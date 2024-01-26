@@ -1,5 +1,5 @@
 // List of distracting websites (can be dynamic based on user settings)
-const distractingWebsites = ["facebook.com", 
+const defaultDistractingWebsites = ["facebook.com", 
                             "reddit.com",
                             "redd.it",
                             "imgur.com",
