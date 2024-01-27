@@ -1,3 +1,5 @@
+// Enhanced Productivity Firefox Extension Script with Probability Feature
+
 // List of distracting websites (can be dynamic based on user settings)
 let distractingWebsites;
 const defaultDistractingWebsites = [
@@ -5,32 +7,40 @@ const defaultDistractingWebsites = [
     "pinterest.com", "twitter.com", "instagram.com"
 ];
 
-// Initialization
-browser.storage.local.get('distractingWebsites', (result) => {
-    distractingWebsites = result.distractingWebsites || defaultDistractingWebsites;
-    console.log("Distracting websites list initialized:", distractingWebsites);
-});
-
 let tabTimers = {}; // Tracks timers for tabs
 let tabCloseReasons = {}; // Tracks reasons for tab closures
 let updateTimeouts = {}; // For debouncing tab updates
+let browserCloseProbability = 0; // Probability of closing all tabs
 
 let maxTimeAllowed = 1800; // Initial max time allowed (e.g., 30 minutes)
-console.log("Initial maximum time allowed set:", maxTimeAllowed, "seconds");
+
+// Initialization
+async function initialize() {
+    const result = await browser.storage.local.get(['distractingWebsites', 'browserCloseProbability', 'lastProbabilityUpdateTime']);
+    distractingWebsites = result.distractingWebsites || defaultDistractingWebsites;
+    updateProbabilityBasedOnCooldown(result.browserCloseProbability, result.lastProbabilityUpdateTime);
+    console.log("Extension initialized with settings:", { distractingWebsites, browserCloseProbability });
+}
+
+// Update probability based on cooldown
+async function updateProbabilityBasedOnCooldown(storedProbability, lastUpdateTime) {
+    const now = Date.now();
+    const hoursSinceUpdate = lastUpdateTime ? (now - lastUpdateTime) / (1000 * 60 * 60) : 0;
+    browserCloseProbability = Math.max(storedProbability - (0.025 * hoursSinceUpdate), 0); // Decrease by 2.5% per hour, minimum 0
+
+    // Update the stored values to reflect any cooldown adjustments
+    await browser.storage.local.set({ browserCloseProbability, lastProbabilityUpdateTime: now });
+    console.log(`Browser close probability after cooldown: ${browserCloseProbability * 100}%`);
+}
 
 function isDistractingWebsite(url) {
-    const isDistracting = distractingWebsites.some(site => url.includes(site));
-    console.log(`URL "${url}" is distracting:`, isDistracting);
-    return isDistracting;
+    return distractingWebsites.some(site => url.includes(site));
 }
 
 // Debounced handling of tab updates
 function handleTabUpdate(tabId, changeInfo) {
-    console.log(`Tab ${tabId} update detected, URL change:`, changeInfo.url);
-
     if (updateTimeouts[tabId]) {
         clearTimeout(updateTimeouts[tabId]);
-        console.log(`Debouncing: Cleared previous timeout for Tab ${tabId}`);
     }
 
     updateTimeouts[tabId] = setTimeout(() => {
@@ -41,33 +51,31 @@ function handleTabUpdate(tabId, changeInfo) {
 
 // Processing tab updates after debouncing
 async function processTabUpdate(tabId, url) {
-    console.log(`Processing update for Tab ${tabId}, URL: ${url}`);
-
     if (isDistractingWebsite(url)) {
-        console.log(`Tab ${tabId} is distracting. Closing other distracting tabs and managing timer.`);
         await closeAndMarkDistractingTabs(tabId);
-
+        await updateProbabilityOnNewTab(); // Increase probability when a new distracting tab is opened
         if (!tabTimers[tabId]) {
             const timeInterval = await getRandomTimeInterval();
-            console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
             startTimer(tabId, timeInterval);
         }
     } else if (tabTimers[tabId]) {
-        console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
         stopTimer(tabId);
-    } else {
-        console.log(`Tab ${tabId} is non-distracting and has no active timer.`);
     }
 }
 
-// Closing existing distracting tabs except the new one
+// Increase probability on new distracting tab
+async function updateProbabilityOnNewTab() {
+    browserCloseProbability = Math.min(browserCloseProbability + 0.05, 1); // Increase by 5%, max 1
+    await browser.storage.local.set({ browserCloseProbability, lastProbabilityUpdateTime: Date.now() });
+    console.log(`Updated browser close probability to ${browserCloseProbability * 100}%`);
+}
+
+// Close existing distracting tabs except the new one
 async function closeAndMarkDistractingTabs(newTabId) {
     const tabs = await browser.tabs.query({});
     for (const tab of tabs.filter(tab => tab.id !== newTabId && isDistractingWebsite(tab.url))) {
-        console.log(`Marking Tab ${tab.id} for closure due to new distracting Tab ${newTabId}`);
         tabCloseReasons[tab.id] = 'timer';
         await browser.tabs.remove(tab.id);
-        console.log(`Closed Tab ${tab.id}`);
         delete tabTimers[tab.id];
         delete tabCloseReasons[tab.id];
     }
@@ -76,91 +84,86 @@ async function closeAndMarkDistractingTabs(newTabId) {
 // Starting a timer for a tab
 function startTimer(tabId, timeInterval) {
     if (tabTimers[tabId]) {
-        console.log(`Timer for Tab ${tabId} already exists. Restarting.`);
         stopTimer(tabId);
     }
 
-    console.log(`Initializing timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
     tabTimers[tabId] = {
         startTime: Date.now(),
         timerId: setInterval(() => {
             let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
-            console.log(`Tab ${tabId} Timer Check, Elapsed: ${elapsed} seconds`);
-
             if (elapsed >= timeInterval) {
-                console.log(`Timer expired for Tab ${tabId}, closing.`);
                 closeTabByTimer(tabId);
             }
         }, 1000)
     };
 }
 
-// Closing a tab due to timer expiration
+// Closing a tab due to timer expiration and checking for all tabs closure
 function closeTabByTimer(tabId) {
-    tabCloseReasons[tabId] = 'timer';
-    console.log(`Closing Tab ${tabId} due to timer expiration.`);
-    browser.tabs.remove(tabId);
+    browser.tabs.remove(tabId).then(() => {
+        onDistractingTabClosed(tabId); // Update last distracting tab close time
+        checkAndCloseAllTabs(); // Check probability and decide whether to close all tabs
+    });
+}
+
+// Check and potentially close all tabs based on the current probability
+function checkAndCloseAllTabs() {
+    if (Math.random() < browserCloseProbability) {
+        browser.tabs.query({}).then(tabs => {
+            const tabIds = tabs.map(tab => tab.id);
+            browser.tabs.remove(tabIds);
+        });
+    }
 }
 
 // Stopping a timer for a tab
 function stopTimer(tabId) {
     if (tabTimers[tabId]) {
-        console.log(`Stopping timer for Tab ${tabId}`);
         clearInterval(tabTimers[tabId].timerId);
         delete tabTimers[tabId];
     }
 }
 
-// Listener for tab removals to handle cleanup and state updates
-browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
-    console.log(`Tab ${tabId} removed, Reason:`, tabCloseReasons[tabId] ? 'Timer' : 'User action');
-    delete tabTimers[tabId];
-    delete tabCloseReasons[tabId];
-});
+// Update last distracting tab close time
+function onDistractingTabClosed(tabId) {
+    browser.storage.local.set({ lastDistractingTabCloseTime: Date.now() });
+}
 
 // Calculate a random time interval considering the reduction factor
 async function getRandomTimeInterval() {
     const reductionFactor = await calculateReductionFactor();
     const interval = Math.floor(Math.random() * maxTimeAllowed * reductionFactor) + 1;
-    console.log(`Calculated time interval: ${interval} seconds, Reduction factor: ${reductionFactor}`);
     return interval;
 }
 
 // Calculate the reduction factor based on the cooldown logic
 async function calculateReductionFactor() {
-    const result = await browser.storage.local.get('lastDistractingWebsiteClosedTime');
-    const lastClosed = result.lastDistractingWebsiteClosedTime || 0;
-    const elapsed = (Date.now() - lastClosed) / 1000;
-    const cooldown = 90 * 60; // 90 minutes in seconds
+    const result = await browser.storage.local.get('lastDistractingTabCloseTime');
+    const lastCloseTime = result.lastDistractingTabCloseTime;
+    const currentTime = Date.now();
 
-    const factor = elapsed >= cooldown ? 1 : 1 - (elapsed / cooldown);
-    console.log(`Reduction factor calculated: ${factor}, Elapsed time: ${elapsed} seconds`);
-    return factor;
-}
-
-// Reset and persistence logic
-function resetMaxTimeAndProbability() {
-    console.log("Resetting max time allowed and other state variables.");
-    maxTimeAllowed = 1800; // Reset to default or user-defined value
-    browser.storage.local.set({ lastResetTimestamp: Date.now() });
-    console.log("Reset operation completed, timestamp updated.");
-}
-
-// Check for reset on startup
-async function checkAndPerformResetOnStartup() {
-    console.log("Checking for required reset on startup.");
-    const { lastResetTimestamp } = await browser.storage.local.get(["lastResetTimestamp"]);
-    const now = Date.now();
-
-    if (!lastResetTimestamp || now - lastResetTimestamp >= 24 * 60 * 60 * 1000) {
-        console.log("Reset required, performing now.");
-        resetMaxTimeAndProbability();
-    } else {
-        console.log("No reset required.");
+    if (!lastCloseTime) {
+        return 1;
     }
+
+    const elapsedTime = (currentTime - lastCloseTime) / 1000;
+    const cooldownPeriod = 90 * 60; // 90 minutes in seconds
+
+    let reductionFactor = elapsedTime / cooldownPeriod;
+    reductionFactor = Math.min(Math.max(reductionFactor, 0), 1);
+    return reductionFactor;
 }
 
-checkAndPerformResetOnStartup();
+// Listener for tab removals to handle cleanup and state updates
+browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    if (tabCloseReasons[tabId] !== 'timer') {
+        if (tabTimers[tabId]) { // Indicates the closed tab was distracting
+            onDistractingTabClosed(tabId); // Update last closure time for user-closed distracting tabs
+        }
+    }
+    delete tabTimers[tabId];
+    delete tabCloseReasons[tabId];
+});
 
 // Attach the debounced update handler to tab updates
 browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -168,3 +171,6 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
         handleTabUpdate(tabId, changeInfo);
     }
 });
+
+// Initialize the extension
+initialize();
