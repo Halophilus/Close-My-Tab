@@ -4,6 +4,8 @@
 
 This Firefox extension is designed to help users manage their time on distracting websites more effectively. By setting time limits and enforcing cooldown periods, it encourages more disciplined browsing habits.
 
+It encourages producitve browsing habits by stochastically assigning time limits to tabs containing distracting content. Every second spent on a distracting website decrements from a time allotment. Every time a distracting tab is closed, there is a period where the stochastic time limits are multiplied by a reducing factor that approaches 1 after a 90 minute cooldown. Every time a distracting tab is opened, the likelihood of a browser closing event at the end of the timer increases by 5%. This probability decrements by 2.5% every hour. At midnight, time allotment resets, but any remaining cooldown depends on user behavior. This was designed as a means of discouraging compulsive browsing behaviors that impede the productive use of the internet.
+
 ## Features
 
 ### Distracting Websites List
