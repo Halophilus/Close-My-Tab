@@ -112,9 +112,23 @@ function closeTabByTimer(tabId) {
     tabCloseReasons[tabId] = 'timer';
     browser.tabs.remove(tabId).then(() => {
         console.log(`Tab ${tabId} closed by timer.`);
+        deductTime(tabId); // Deduct time from maxTimeAllowed
         onDistractingTabClosed(tabId); // Update the last closure time
     });
 }
+
+browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    if (tabCloseReasons[tabId] !== 'timer' && tabTimers[tabId]) {
+        console.log(`Distracting Tab ${tabId} closed by the user.`);
+        deductTime(tabId); // Deduct time from maxTimeAllowed
+        onDistractingTabClosed(tabId); // Update the last closure time
+    }
+
+    // Cleanup
+    delete tabTimers[tabId];
+    delete tabCloseReasons[tabId];
+});
+
 
 function stopTimer(tabId) {
     if (tabTimers[tabId]) {
@@ -124,28 +138,17 @@ function stopTimer(tabId) {
     }
 }
 
-browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
-    if (tabCloseReasons[tabId] === 'timer') {
-        console.log(`Tab ${tabId} was closed by the extension's timer.`);
-    } else {
-        console.log(`Tab ${tabId} was closed by the user.`);
-        if (tabTimers[tabId]) { // Indicates the closed tab was distracting
-            console.log(`Distracting Tab ${tabId} closed by the user. Time spent will be deducted from maxTimeAllowed.`);
-            deductTime(tabId);
-        }
-    }
+function deductTime(tabId) {
+    if (!tabTimers[tabId]) return;
 
-    // Cleanup for all closed tabs
-    delete tabTimers[tabId];
-    delete tabCloseReasons[tabId];
-});
-
-async function deductTime(tabId) {
     const elapsedTime = (Date.now() - tabTimers[tabId].startTime) / 1000; // in seconds
     maxTimeAllowed = Math.max(0, maxTimeAllowed - elapsedTime);
     console.log(`Deducted ${elapsedTime} seconds from maxTimeAllowed for Tab ${tabId}. New maxTimeAllowed: ${maxTimeAllowed} seconds.`);
-    await browser.storage.local.set({ maxTimeAllowed }); // Persist the updated maxTimeAllowed
+    
+    // Persist the updated maxTimeAllowed
+    browser.storage.local.set({ maxTimeAllowed });
 }
+
 
 // Calculate a random time interval considering the reduction factor and remaining maxTimeAllowed
 async function getRandomTimeInterval(tabId) {
@@ -157,27 +160,29 @@ async function getRandomTimeInterval(tabId) {
 }
 
 async function calculateReductionFactor() {
-    const result = await browser.storage.local.get('lastDistractingTabCloseTime');
-    const lastCloseTime = result.lastDistractingTabCloseTime;
+    const { lastDistractingTabCloseTime } = await browser.storage.local.get('lastDistractingTabCloseTime');
     const currentTime = Date.now();
 
-    if (!lastCloseTime) {
+    // Check if the last distracting tab close time is recorded
+    if (!lastDistractingTabCloseTime) {
         console.log("No recorded last distracting tab closure time. Setting reduction factor to 1.");
         return 1;
     }
 
-    const elapsedTime = (currentTime - lastCloseTime) / 1000; // Convert ms to seconds
+    const elapsedTime = (currentTime - lastDistractingTabCloseTime) / 1000; // Convert ms to seconds
     const cooldownPeriod = 90 * 60; // 90 minutes in seconds
 
+    // Calculate the reduction factor, ensuring it's within the range [0, 1]
     let reductionFactor = elapsedTime / cooldownPeriod;
-    reductionFactor = Math.min(Math.max(reductionFactor, 0), 1); // Ensure the factor is within [0,1]
+    reductionFactor = Math.min(Math.max(reductionFactor, 0), 1);
 
     console.log(`Reduction factor calculated: ${reductionFactor}, based on ${elapsedTime} seconds since last distracting tab closure.`);
     return reductionFactor;
 }
 
+
 function onDistractingTabClosed(tabId) {
-    console.log(`Updating last closure time for distracting Tab ${tabId}.`);
+    console.log(`Distracting tab closed: Tab ${tabId}. Updating last closure time.`);
     browser.storage.local.set({ lastDistractingTabCloseTime: Date.now() }).then(() => {
         console.log(`Last distracting tab closure time updated for Tab ${tabId}.`);
     });
