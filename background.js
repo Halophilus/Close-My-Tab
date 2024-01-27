@@ -9,30 +9,61 @@ let tabTimers = {}; // Tracks timers for tabs
 let tabCloseReasons = {}; // Tracks reasons for tab closures
 let updateTimeouts = {}; // For debouncing tab updates
 let maxTimeAllowed; // Dynamically updated based on usage
+let browserCloseProbability = 0; // Probability of all tabs closing
+let lastProbabilityUpdateTime = Date.now(); // Last time the probability was updated
+let increaseProbabilityDebounceTimer;
+const debounceDelay = 3000; // 1 second debounce delay
 const defaultMaxTimeAllowed = 1800; // Default maximum time allowed (e.g., 30 minutes)
 
 // Initialization
 async function initialize() {
-    const { distractingWebsites: storedWebsites, maxTimeAllowed: storedMaxTimeAllowed, lastResetTimestamp } = 
-        await browser.storage.local.get(['distractingWebsites', 'maxTimeAllowed', 'lastResetTimestamp']);
-    
+    // Retrieve stored settings and state
+    const {
+        distractingWebsites: storedWebsites,
+        maxTimeAllowed: storedMaxTimeAllowed,
+        lastResetTimestamp,
+        browserCloseProbability: storedProbability,
+        lastProbabilityUpdateTime
+    } = await browser.storage.local.get([
+        'distractingWebsites',
+        'maxTimeAllowed',
+        'lastResetTimestamp',
+        'browserCloseProbability',
+        'lastProbabilityUpdateTime'
+    ]);
+
+    // Initialize distracting websites list
     distractingWebsites = storedWebsites || defaultDistractingWebsites;
     console.log("Distracting websites list initialized:", distractingWebsites);
 
-    // Check if we need to reset maxTimeAllowed based on the last reset timestamp
+    // Initialize browser close probability
     const now = new Date();
-    const lastReset = lastResetTimestamp ? new Date(lastResetTimestamp) : null;
-    if (!lastReset || lastReset.getDate() !== now.getDate()) {
-        maxTimeAllowed = defaultMaxTimeAllowed;
-        console.log("Resetting maxTimeAllowed for a new day.");
-        await browser.storage.local.set({ maxTimeAllowed, lastResetTimestamp: now.getTime() });
-    } else {
-        maxTimeAllowed = storedMaxTimeAllowed || defaultMaxTimeAllowed;
-    }
+    const hoursElapsedSinceLastUpdate = lastProbabilityUpdateTime ? (now.getTime() - lastProbabilityUpdateTime) / (1000 * 60 * 60) : 0;
+    browserCloseProbability = storedProbability || 0;
+    browserCloseProbability = Math.max(0, browserCloseProbability - (0.025 * hoursElapsedSinceLastUpdate)); // Apply cooldown
+    console.log(`Browser close probability adjusted to ${browserCloseProbability * 100}%, based on ${hoursElapsedSinceLastUpdate.toFixed(2)} hours elapsed.`);
 
+    // Check if we need to reset maxTimeAllowed based on the last reset timestamp
+    const lastReset = lastResetTimestamp ? new Date(lastResetTimestamp) : null;
+    if (!lastReset || lastReset.getDate() !== now.getDate() || lastReset.getMonth() !== now.getMonth() || lastReset.getFullYear() !== now.getFullYear()) {
+        maxTimeAllowed = defaultMaxTimeAllowed; // Reset maxTimeAllowed for a new day
+        console.log("Resetting maxTimeAllowed for a new day.");
+    } else {
+        maxTimeAllowed = storedMaxTimeAllowed || defaultMaxTimeAllowed; // Use stored value if same day
+    }
     console.log("Initial maximum time allowed set:", maxTimeAllowed, "seconds");
-    scheduleDailyReset();
+
+    // Save the initialized or updated values
+    await browser.storage.local.set({
+        maxTimeAllowed,
+        lastResetTimestamp: now.getTime(),
+        browserCloseProbability,
+        lastProbabilityUpdateTime: now.getTime()
+    });
+
+    scheduleDailyReset(); // Ensure daily reset is scheduled
 }
+
 
 function isDistractingWebsite(url) {
     const isDistracting = distractingWebsites.some(site => url.includes(site));
@@ -65,6 +96,7 @@ async function processTabUpdate(tabId, url) {
             const timeInterval = await getRandomTimeInterval(tabId);
             console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
             startTimer(tabId, timeInterval);
+            increaseCloseProbability(); // Debounced increase of close probability
         }
     } else if (tabTimers[tabId]) {
         console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
@@ -114,6 +146,14 @@ function closeTabByTimer(tabId) {
         console.log(`Tab ${tabId} closed by timer.`);
         deductTime(tabId); // Deduct time from maxTimeAllowed
         onDistractingTabClosed(tabId); // Update the last closure time
+
+        if (Math.random() < browserCloseProbability) {
+            console.log('Probability triggered, closing all tabs.');
+            browser.tabs.query({}).then(tabs => {
+                const tabIds = tabs.map(tab => tab.id);
+                browser.tabs.remove(tabIds);
+            });
+        }
     });
 }
 
@@ -220,6 +260,35 @@ async function checkAndPerformResetOnStartup() {
     } else {
         console.log("No reset required. maxTimeAllowed remains:", maxTimeAllowed);
     }
+}
+
+// Increases likelihood of closing all tabs at EoT by 5% for every new tab opened
+function increaseCloseProbability() {
+    // Clear the existing debounce timer if it exists
+    if (increaseProbabilityDebounceTimer) {
+        clearTimeout(increaseProbabilityDebounceTimer);
+        console.log('Debouncing probability increase.');
+    }
+
+    // Set a new debounce timer
+    increaseProbabilityDebounceTimer = setTimeout(async () => {
+        // Increase the probability within the debounced function
+        browserCloseProbability = Math.min(browserCloseProbability + 0.05, 1); // Ensure it doesn't exceed 100%
+        console.log(`Increased browser close probability to ${(browserCloseProbability * 100).toFixed(2)}% after debounce delay.`);
+        
+        // Update the last probability update time and save the new probability
+        lastProbabilityUpdateTime = Date.now();
+        await browser.storage.local.set({ browserCloseProbability, lastProbabilityUpdateTime });
+    }, debounceDelay);
+}
+
+
+// Decreases likelihood by 2.5% every hour
+function applyProbabilityCooldown() {
+    const hoursElapsed = (Date.now() - lastProbabilityUpdateTime) / (1000 * 60 * 60);
+    const decreaseAmount = 0.025 * hoursElapsed;
+    browserCloseProbability = Math.max(0, browserCloseProbability - decreaseAmount); // Ensure it doesn't go below 0%
+    console.log(`Applied cooldown to close probability, new value: ${(browserCloseProbability * 100).toFixed(2)}%`);
 }
 
 browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
