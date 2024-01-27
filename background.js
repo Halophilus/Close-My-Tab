@@ -1,278 +1,170 @@
 // List of distracting websites (can be dynamic based on user settings)
 let distractingWebsites;
-const defaultDistractingWebsites = ["facebook.com", 
-                            "reddit.com",
-                            "redd.it",
-                            "imgur.com",
-                            "x.com",
-                            "pinterest.com",
-                            "twitter.com", 
-                            "instagram.com"];
+const defaultDistractingWebsites = [
+    "facebook.com", "reddit.com", "redd.it", "imgur.com", "x.com",
+    "pinterest.com", "twitter.com", "instagram.com"
+];
 
+// Initialization
 browser.storage.local.get('distractingWebsites', (result) => {
     distractingWebsites = result.distractingWebsites || defaultDistractingWebsites;
+    console.log("Distracting websites list initialized:", distractingWebsites);
 });
 
+let tabTimers = {}; // Tracks timers for tabs
+let tabCloseReasons = {}; // Tracks reasons for tab closures
+let updateTimeouts = {}; // For debouncing tab updates
 
-// Object to keep track of timers for each tab
-let tabTimers = {};
+let maxTimeAllowed = 1800; // Initial max time allowed (e.g., 30 minutes)
+console.log("Initial maximum time allowed set:", maxTimeAllowed, "seconds");
 
-// Initial maximum time allowed in seconds (set by the user)
-let maxTimeAllowed = 1800; // Example: 30 minutes
-
-// Probability of closing the browser (0 to 1, where 1 is 100%)
-let browserCloseProbability = 0;
-
-console.log("Background script started, initial maxTimeAllowed:", maxTimeAllowed);
-
-// Function to check if a URL is distracting
 function isDistractingWebsite(url) {
     const isDistracting = distractingWebsites.some(site => url.includes(site));
-    console.log(`Checking if ${url} is a distracting website:`, isDistracting);
+    console.log(`URL "${url}" is distracting:`, isDistracting);
     return isDistracting;
 }
 
-// Listening for tab updates
-browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.url) {
-        console.log(`Tab ${tabId} updated, new URL:`, changeInfo.url);
-        handleTabUpdate(tabId, changeInfo.url);
+// Debounced handling of tab updates
+function handleTabUpdate(tabId, changeInfo) {
+    console.log(`Tab ${tabId} update detected, URL change:`, changeInfo.url);
+
+    if (updateTimeouts[tabId]) {
+        clearTimeout(updateTimeouts[tabId]);
+        console.log(`Debouncing: Cleared previous timeout for Tab ${tabId}`);
     }
-});
 
-// Handling tab updates
-function handleTabUpdate(tabId, url) {
+    updateTimeouts[tabId] = setTimeout(() => {
+        processTabUpdate(tabId, changeInfo.url);
+        delete updateTimeouts[tabId];
+    }, 100); // Adjust debounce time as needed
+}
+
+// Processing tab updates after debouncing
+async function processTabUpdate(tabId, url) {
+    console.log(`Processing update for Tab ${tabId}, URL: ${url}`);
+
     if (isDistractingWebsite(url)) {
-        console.log(`Starting timer for tab ${tabId} (distracting website)`);
+        console.log(`Tab ${tabId} is distracting. Closing other distracting tabs and managing timer.`);
+        await closeAndMarkDistractingTabs(tabId);
 
-        // Close the previous distracting tab and wait for it to close
-        closePreviousDistractingTab().then(() => {
-            // Calculate the reduction factor after the previous tab is closed
-            return calculateReductionFactor();
-        }).then((reductionFactor) => {
-            // Set the time interval for the new tab with the reduction factor applied
-            const timeInterval = Math.floor(Math.random() * maxTimeAllowed * reductionFactor) + 1;
-            console.log(`Generated random time interval: ${timeInterval} seconds`);
-            startTimer(tabId, timeInterval); // Start the timer for the new tab
-        }).catch((error) => {
-            console.error("Error handling tab update:", error);
-        });
-    } else {
-        console.log(`Stopping timer for tab ${tabId} (not a distracting website)`);
+        if (!tabTimers[tabId]) {
+            const timeInterval = await getRandomTimeInterval();
+            console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
+            startTimer(tabId, timeInterval);
+        }
+    } else if (tabTimers[tabId]) {
+        console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
         stopTimer(tabId);
+    } else {
+        console.log(`Tab ${tabId} is non-distracting and has no active timer.`);
     }
 }
 
-// Start a timer for a tab
-function startTimer(tabId) {
-    stopTimer(tabId); // Stop any existing timer
+// Closing existing distracting tabs except the new one
+async function closeAndMarkDistractingTabs(newTabId) {
+    const tabs = await browser.tabs.query({});
+    for (const tab of tabs.filter(tab => tab.id !== newTabId && isDistractingWebsite(tab.url))) {
+        console.log(`Marking Tab ${tab.id} for closure due to new distracting Tab ${newTabId}`);
+        tabCloseReasons[tab.id] = 'timer';
+        await browser.tabs.remove(tab.id);
+        console.log(`Closed Tab ${tab.id}`);
+        delete tabTimers[tab.id];
+        delete tabCloseReasons[tab.id];
+    }
+}
 
-    let timeLimit = getRandomTimeInterval();
-    console.log(`Timer started for tab ${tabId}, time limit: ${timeLimit} seconds`);
+// Starting a timer for a tab
+function startTimer(tabId, timeInterval) {
+    if (tabTimers[tabId]) {
+        console.log(`Timer for Tab ${tabId} already exists. Restarting.`);
+        stopTimer(tabId);
+    }
 
+    console.log(`Initializing timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
     tabTimers[tabId] = {
         startTime: Date.now(),
-        timeLimit: timeLimit, // Time limit for this tab session
         timerId: setInterval(() => {
-            let currentTime = Date.now();
-            let timeSpent = (currentTime - tabTimers[tabId].startTime) / 1000;
+            let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
+            console.log(`Tab ${tabId} Timer Check, Elapsed: ${elapsed} seconds`);
 
-            if (timeSpent >= timeLimit) {
-                console.log(`Time limit exceeded for tab ${tabId}, closing tab`);
-                browser.tabs.remove(tabId); // Close the tab
-                reduceMaxTime(timeSpent); // Deduct the time spent from the maximum allowed time
-                increaseBrowserCloseProbability(); // Increase the chance of closing the browser
+            if (elapsed >= timeInterval) {
+                console.log(`Timer expired for Tab ${tabId}, closing.`);
+                closeTabByTimer(tabId);
             }
         }, 1000)
     };
 }
 
-// Stop the timer for a tab
+// Closing a tab due to timer expiration
+function closeTabByTimer(tabId) {
+    tabCloseReasons[tabId] = 'timer';
+    console.log(`Closing Tab ${tabId} due to timer expiration.`);
+    browser.tabs.remove(tabId);
+}
+
+// Stopping a timer for a tab
 function stopTimer(tabId) {
     if (tabTimers[tabId]) {
+        console.log(`Stopping timer for Tab ${tabId}`);
         clearInterval(tabTimers[tabId].timerId);
-        console.log(`Timer stopped for tab ${tabId}`);
         delete tabTimers[tabId];
     }
 }
 
-// Listening for tab removal to stop the timer
-browser.tabs.onRemoved.addListener((tabId) => {
-    console.log(`Tab ${tabId} removed, stopping timer`);
-    stopTimer(tabId);
+// Listener for tab removals to handle cleanup and state updates
+browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    console.log(`Tab ${tabId} removed, Reason:`, tabCloseReasons[tabId] ? 'Timer' : 'User action');
+    delete tabTimers[tabId];
+    delete tabCloseReasons[tabId];
 });
 
-// Function to update time spent in storage
-function updateStorageWithTimeSpent(url, timeSpent) {
-    browser.storage.local.get("websiteData")
-    .then((result) => {
-        let websiteData = result.websiteData || {};
-        websiteData[url] = (websiteData[url] || 0) + timeSpent;
-
-        console.log(`Updating time spent for ${url}, new time: ${websiteData[url]}`);
-        browser.storage.local.set({websiteData: websiteData});
-    })
-    .catch((error) => {
-        console.error(`Error updating website data for ${url}: ${error}`);
-    });
+// Calculate a random time interval considering the reduction factor
+async function getRandomTimeInterval() {
+    const reductionFactor = await calculateReductionFactor();
+    const interval = Math.floor(Math.random() * maxTimeAllowed * reductionFactor) + 1;
+    console.log(`Calculated time interval: ${interval} seconds, Reduction factor: ${reductionFactor}`);
+    return interval;
 }
 
-// Function to get a random time interval within the allowed range
-function getRandomTimeInterval() {
-    // Calculate the reduction factor here
-    const calculatedReductionFactor = calculateReductionFactor();
-    const timeInterval = Math.floor(Math.random() * maxTimeAllowed * calculatedReductionFactor) + 1;
-    console.log(`Generated random time interval: ${timeInterval} seconds`);
-    return timeInterval;
+// Calculate the reduction factor based on the cooldown logic
+async function calculateReductionFactor() {
+    const result = await browser.storage.local.get('lastDistractingWebsiteClosedTime');
+    const lastClosed = result.lastDistractingWebsiteClosedTime || 0;
+    const elapsed = (Date.now() - lastClosed) / 1000;
+    const cooldown = 90 * 60; // 90 minutes in seconds
+
+    const factor = elapsed >= cooldown ? 1 : 1 - (elapsed / cooldown);
+    console.log(`Reduction factor calculated: ${factor}, Elapsed time: ${elapsed} seconds`);
+    return factor;
 }
 
-// Constants for cooldown and maximum reduction factor
-const cooldownPeriod = 90 * 60; // 90 minutes in seconds
-const maxReductionFactor = 1;
-
-// Function to calculate the reduction factor
-function calculateReductionFactor() {
-    return browser.storage.local.get('lastDistractingWebsiteClosedTime')
-        .then((result) => {
-            const lastDistractingWebsiteClosedTime = result.lastDistractingWebsiteClosedTime;
-
-            if (!lastDistractingWebsiteClosedTime) {
-                // If no distracting website has been closed yet, return max reduction factor
-                return maxReductionFactor;
-            }
-
-            // Calculate the time elapsed since the last distracting website was closed
-            const currentTime = Date.now() / 1000; // Convert to seconds
-            const timeElapsed = currentTime - lastDistractingWebsiteClosedTime;
-
-            // Calculate the reduction factor based on the time elapsed
-            let reductionFactor = (cooldownPeriod - timeElapsed) / cooldownPeriod;
-
-            // Ensure the reduction factor is within bounds
-            reductionFactor = Math.max(0, reductionFactor);
-            reductionFactor = Math.min(maxReductionFactor, reductionFactor);
-
-            return reductionFactor;
-        });
-}
-
-// Function to update the last distracting website closed time
-function updateLastDistractingWebsiteClosedTime() {
-    const currentTime = Date.now() / 1000; // Convert to seconds
-    browser.storage.local.set({ lastDistractingWebsiteClosedTime: currentTime });
-}
-
-// Call this function when a distracting website tab is closed
-function onDistractingWebsiteClosed() {
-    updateLastDistractingWebsiteClosedTime();
-}
-
-
-// Function to reduce the maximum allowed time
-function reduceMaxTime(timeSpent) {
-    maxTimeAllowed -= timeSpent;
-    if (maxTimeAllowed < 0) {
-        console.log("maxTimeAllowed went below zero, resetting to 0");
-        maxTimeAllowed = 0; // Ensure it doesn't go below zero
-    }
-    console.log(`Reduced maxTimeAllowed, new value: ${maxTimeAllowed}`);
-    browser.storage.local.set({maxTimeAllowed: maxTimeAllowed});
-}
-
-// Function to increase the probability of closing the browser
-function increaseBrowserCloseProbability() {
-    browserCloseProbability += 0.05;
-    if (browserCloseProbability > 1) {
-        browserCloseProbability = 1;
-    }
-    console.log(`Increased browserCloseProbability, new value: ${browserCloseProbability}`);
-
-    browser.storage.local.set({browserCloseProbability: browserCloseProbability});
-
-    if (Math.random() < browserCloseProbability) {
-        console.log("Probability triggered, closing all tabs");
-        closeAllTabs(); // Close all tabs, effectively closing the browser
-    }
-}
-
-function closeAllTabs() {
-    browser.tabs.query({}).then(tabs => {
-        const tabIds = tabs.map(tab => tab.id);
-        console.log("Closing all tabs:", tabIds);
-        browser.tabs.remove(tabIds).catch(err => console.error("Error closing tabs:", err));
-    }).catch(err => console.error("Error querying tabs:", err));
-}
-
-// Function to reset the maximum time allowed and browser close probability
+// Reset and persistence logic
 function resetMaxTimeAndProbability() {
-    console.log("Resetting maxTimeAllowed and browserCloseProbability to initial values");
-    maxTimeAllowed = 1800;
-    browserCloseProbability = 0;
-    browser.storage.local.set({maxTimeAllowed: maxTimeAllowed, browserCloseProbability: browserCloseProbability});
-
-    let lastResetDate = new Date().toISOString().split('T')[0];
-    browser.storage.local.set({lastResetDate: lastResetDate});
+    console.log("Resetting max time allowed and other state variables.");
+    maxTimeAllowed = 1800; // Reset to default or user-defined value
+    browser.storage.local.set({ lastResetTimestamp: Date.now() });
+    console.log("Reset operation completed, timestamp updated.");
 }
 
-// Function to schedule a daily reset
-function scheduleDailyReset() {
-    console.log("Scheduling daily reset for maxTimeAllowed and browserCloseProbability");
-    browser.alarms.create("midnightReset", {
-        when: Date.now() + timeUntilMidnight(),
-        periodInMinutes: 1440
-    });
-}
+// Check for reset on startup
+async function checkAndPerformResetOnStartup() {
+    console.log("Checking for required reset on startup.");
+    const { lastResetTimestamp } = await browser.storage.local.get(["lastResetTimestamp"]);
+    const now = Date.now();
 
-// Alarm listener
-browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === "midnightReset") {
-        console.log("Midnight reset triggered");
-        resetMaxTimeAndProbability();
-    }
-});
-
-// Calculate time until midnight
-function timeUntilMidnight() {
-    let now = new Date();
-    let midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
-    return midnight.getTime() - now.getTime();
-}
-
-// Retrieve the stored maximum time allowed, last reset date, and browser close probability on startup
-browser.storage.local.get(["maxTimeAllowed", "lastResetDate", "browserCloseProbability"])
-.then((result) => {
-    let today = new Date().toISOString().split('T')[0];
-    if (result.lastResetDate !== today) {
-        console.log("Last reset date is not today, resetting values");
+    if (!lastResetTimestamp || now - lastResetTimestamp >= 24 * 60 * 60 * 1000) {
+        console.log("Reset required, performing now.");
         resetMaxTimeAndProbability();
     } else {
-        maxTimeAllowed = result.maxTimeAllowed || 1800;
-        browserCloseProbability = result.browserCloseProbability || 0;
-        console.log("Retrieved maxTimeAllowed and browserCloseProbability from storage");
+        console.log("No reset required.");
     }
-})
-.catch((error) => {
-    console.error("Error retrieving data on startup:", error);
-    maxTimeAllowed = 1800;
-    browserCloseProbability = 0;
-});
-
-// Function to close the previous distracting tab and wait for it to close
-function closePreviousDistractingTab() {
-    return new Promise((resolve) => {
-        browser.tabs.query({}).then(tabs => {
-            for (const tab of tabs) {
-                if (isDistractingWebsite(tab.url)) {
-                    console.log(`Closing previous distracting tab ${tab.id}`);
-                    browser.tabs.remove(tab.id).then(() => {
-                        resolve(); // Resolve the promise when the tab is closed
-                    });
-                    return; // Exit the loop after closing the first distracting tab
-                }
-            }
-            resolve(); // Resolve the promise if no previous distracting tab is found
-        });
-    });
 }
 
-scheduleDailyReset();
+checkAndPerformResetOnStartup();
+
+// Attach the debounced update handler to tab updates
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url) {
+        handleTabUpdate(tabId, changeInfo);
+    }
+});
