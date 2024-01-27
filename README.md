@@ -44,10 +44,3 @@ After installing the extension, users should:
 
 Currently, this extension must be loaded into Firefox as a temporary add-on via `about:debugging` for development and testing purposes. Future updates will include standard installation methods through Firefox Add-ons.
 
-## Contributing
-
-Feedback and contributions are welcome. Please open an issue or pull request in the project repository.
-
----
-
-This README provides a brief overview of the extension's functionality. Users and developers should refer to the extension's documentation and code comments for more detailed information.
