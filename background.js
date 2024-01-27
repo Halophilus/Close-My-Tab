@@ -257,21 +257,6 @@ browser.storage.local.get(["maxTimeAllowed", "lastResetDate", "browserCloseProba
     browserCloseProbability = 0;
 });
 
-// Handling tab updates
-function handleTabUpdate(tabId, url) {
-    if (isDistractingWebsite(url)) {
-        console.log(`Starting timer for tab ${tabId} (distracting website)`);
-
-        // Close all other distracting tabs
-        closeOtherDistractingTabs(tabId);
-
-        startTimer(tabId);
-    } else {
-        console.log(`Stopping timer for tab ${tabId} (not a distracting website)`);
-        stopTimer(tabId);
-    }
-}
-
 // Function to close the previous distracting tab and wait for it to close
 function closePreviousDistractingTab() {
     return new Promise((resolve) => {
@@ -289,6 +274,5 @@ function closePreviousDistractingTab() {
         });
     });
 }
-
 
 scheduleDailyReset();
