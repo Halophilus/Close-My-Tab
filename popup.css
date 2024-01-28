@@ -1,0 +1,77 @@
+body {
+    width: 350px;
+    background-color: #333; /* Dark background for the popup */
+    color: white;
+    font-family: Arial, sans-serif;
+    padding: 15px;
+}
+
+.banner-container {
+    width: 100%; /* The container takes the full width of the body */
+    box-sizing: border-box; /* Padding and border are included in the width */
+}
+
+.banner-image {
+    width: 100%; /* The image takes the full width of its container */
+    height: auto; /* Height adjusts automatically to maintain aspect ratio */
+    display: block; /* Ensures the image takes up its own line and doesn't have space below */
+}
+
+.progress-container, .time-since-last-close, .add-site {
+    margin-bottom: 15px; /* Spacing between each element */
+}
+
+.title {
+    text-align: center;
+    margin-bottom: 5px;
+}
+
+.progress-bar-bg {
+    background-color: #444; /* Darker gray for the progress bar background */
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 20px;
+    width: 0%; /* Initial state of the progress bars */
+    transition: width 0.5s ease; /* Smooth transition for width changes */
+}
+
+.green {
+    background-color: #4CAF50; /* Green for the time remaining */
+}
+
+.blue {
+    background-color: #2196F3; /* Blue for the reduction factor */
+}
+
+.red {
+    background-color: #f44336; /* Red for the close probability */
+}
+
+.time-since-last-close {
+    text-align: left;
+}
+
+input[type="text"] {
+    width: calc(100% - 80px); /* Adjust width to make room for the button */
+    padding: 10px;
+    margin-right: 5px;
+    border: none;
+    border-radius: 5px;
+}
+
+button {
+    width: 50px;
+    height: 40px;
+    border: none;
+    border-radius: 5px;
+    background-color: #4CAF50; /* Matching the green theme for the button */
+    color: white;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #45a049;
+}

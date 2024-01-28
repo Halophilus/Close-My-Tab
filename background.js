@@ -23,13 +23,15 @@ async function initialize() {
         maxTimeAllowed: storedMaxTimeAllowed,
         lastResetTimestamp,
         browserCloseProbability: storedProbability,
-        lastProbabilityUpdateTime
+        lastProbabilityUpdateTime,
+        reductionFactor : storedReductionFactor
     } = await browser.storage.local.get([
         'distractingWebsites',
         'maxTimeAllowed',
         'lastResetTimestamp',
         'browserCloseProbability',
-        'lastProbabilityUpdateTime'
+        'lastProbabilityUpdateTime',
+        'reductionFactor'
     ]);
 
     // Initialize distracting websites list
@@ -53,15 +55,51 @@ async function initialize() {
     }
     console.log("Initial maximum time allowed set:", maxTimeAllowed, "seconds");
 
+    let reductionFactor = storedReductionFactor;
+    if (!reductionFactor) {
+        reductionFactor = await calculateReductionFactor();
+        await browser.storage.local.set({ reductionFactor });
+        console.log("Reduction factor calculated and stored:", reductionFactor);
+    } else {
+        console.log("Using stored reduction factor:", reductionFactor);
+    }
+
     // Save the initialized or updated values
     await browser.storage.local.set({
         maxTimeAllowed,
         lastResetTimestamp: now.getTime(),
         browserCloseProbability,
-        lastProbabilityUpdateTime: now.getTime()
+        lastProbabilityUpdateTime: now.getTime(),
+        reductionFactor
     });
 
     scheduleDailyReset(); // Ensure daily reset is scheduled
+    applyProbabilityCooldown();
+    updateIcon();
+}
+
+function updateIcon() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 128; // Use the largest size for best quality
+    canvas.height = 128;
+    const baseIcon = new Image();
+
+    baseIcon.onload = () => {
+        ctx.drawImage(baseIcon, 0, 0, canvas.width, canvas.height);
+
+        // Calculate the blackout overlay based on the remaining time
+        const timeRatio = maxTimeAllowed / defaultMaxTimeAllowed;
+        const height = canvas.height * (1 - timeRatio); // Height of the blackout overlay
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; // Semi-transparent black
+        ctx.fillRect(0, canvas.height - height, canvas.width, height);
+
+        // Convert the canvas to an image data URL and set it as the icon
+        browser.browserAction.setIcon({ imageData: ctx.getImageData(0, 0, canvas.width, canvas.height) });
+    };
+
+    baseIcon.src = 'icons/128.png'; // Path to your base icon image
 }
 
 
@@ -215,11 +253,16 @@ async function calculateReductionFactor() {
     // Calculate the reduction factor, ensuring it's within the range [0, 1]
     let reductionFactor = elapsedTime / cooldownPeriod;
     reductionFactor = Math.min(Math.max(reductionFactor, 0), 1);
-
+    browser.storage.local.set({ reductionFactor: reductionFactor })
+        .then(() => {
+        console.log(`Reduction factor updated and stored: ${reductionFactor}`);
+        })
+        .catch(error => {
+        console.error("Error updating and storing reduction factor:", error);
+        });
     console.log(`Reduction factor calculated: ${reductionFactor}, based on ${elapsedTime} seconds since last distracting tab closure.`);
     return reductionFactor;
 }
-
 
 function onDistractingTabClosed(tabId) {
     console.log(`Distracting tab closed: Tab ${tabId}. Updating last closure time.`);
@@ -295,4 +338,18 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (changeInfo.url) handleTabUpdate(tabId, changeInfo);
 });
 
+// Listen for messages from other parts of the extension
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "calculateReductionFactor") {
+        calculateReductionFactor().then(reductionFactor => {
+            sendResponse({ reductionFactor });
+        });
+        return true; // Indicates you wish to send a response asynchronously
+    }
+});
+
+
 initialize().then(checkAndPerformResetOnStartup).then(scheduleDailyReset);
+setInterval(applyProbabilityCooldown, 3600000); // Updates browser close probability every hour
+setInterval(calculateReductionFactor, 15 * 1000); // 60 * 1000 ms = 1 minute
+setInterval(updateIcon, 15 * 1000);

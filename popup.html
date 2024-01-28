@@ -1,17 +1,44 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Time Tracker</title>
+    <link rel="stylesheet" type="text/css" href="popup.css">
 </head>
 <body>
-    <h1>Time Tracker</h1>
-    <div>
-        <p id="timeLeft">Time Left: Loading...</p>
-        <div>
-            <input type="text" id="newWebsite" placeholder="Add a new website...">
-            <button id="addWebsite">Add</button>
+    <div class="banner-container">
+        <img src="/icons/banner.png" alt="Close My Tab" class="banner-image">
+    </div>
+    
+    <div class="progress-container">
+        <div class="title">Time Remaining</div>
+        <div class="progress-bar-bg">
+            <div id="timeRemaining" class="progress-bar green"></div>
         </div>
     </div>
+
+    <div class="progress-container">
+        <div class="title">Reduction Factor</div>
+        <div class="progress-bar-bg">
+            <div id="reductionFactor" class="progress-bar blue"></div>
+        </div>
+    </div>
+
+    <div class="progress-container">
+        <div class="title">Close Probability</div>
+        <div class="progress-bar-bg">
+            <div id="closeProbability" class="progress-bar red"></div>
+        </div>
+    </div>
+
+    <div class="time-since-last-close">
+        <div class="title"></div>
+        <div id="timeSinceLastClose">00:00:00</div>
+    </div>
+
+    <div class="add-site">
+        <input type="text" id="newSite" placeholder="Add site to blacklist...">
+        <button id="addSite">Add</button>
+    </div>
+
     <script src="popup.js"></script>
 </body>
 </html>
