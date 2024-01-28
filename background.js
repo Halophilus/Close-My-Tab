@@ -327,12 +327,17 @@ function increaseCloseProbability() {
 
 
 // Decreases likelihood by 2.5% every hour
-function applyProbabilityCooldown() {
+async function applyProbabilityCooldown() {
     const hoursElapsed = (Date.now() - lastProbabilityUpdateTime) / (1000 * 60 * 60);
     const decreaseAmount = 0.025 * hoursElapsed;
-    browserCloseProbability = Math.max(0, browserCloseProbability - decreaseAmount); // Ensure it doesn't go below 0%
+    browserCloseProbability = Math.max(0, browserCloseProbability - decreaseAmount);
     console.log(`Applied cooldown to close probability, new value: ${(browserCloseProbability * 100).toFixed(2)}%`);
+
+    // Update the last update time and save the new probability
+    lastProbabilityUpdateTime = Date.now();
+    await browser.storage.local.set({ browserCloseProbability, lastProbabilityUpdateTime });
 }
+
 
 browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (changeInfo.url) handleTabUpdate(tabId, changeInfo);

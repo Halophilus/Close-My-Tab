@@ -1,6 +1,6 @@
 # CLOSE MY TAB Firefox Extension
 
-![Logo](/icons/main.png)
+![Logo](/icons/banner_hires.png)
 
 This Firefox extension is designed to help users manage their time on distracting websites more effectively. By setting time limits and enforcing cooldown periods, it encourages more disciplined browsing habits.
 
