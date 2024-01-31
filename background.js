@@ -24,7 +24,7 @@ async function initialize() {
         lastResetTimestamp,
         browserCloseProbability: storedProbability,
         lastProbabilityUpdateTime,
-        reductionFactor : storedReductionFactor
+        reductionFactor: storedReductionFactor
     } = await browser.storage.local.get([
         'distractingWebsites',
         'maxTimeAllowed',
@@ -45,15 +45,19 @@ async function initialize() {
     browserCloseProbability = Math.max(0, browserCloseProbability - (0.025 * hoursElapsedSinceLastUpdate)); // Apply cooldown
     console.log(`Browser close probability adjusted to ${browserCloseProbability * 100}%, based on ${hoursElapsedSinceLastUpdate.toFixed(2)} hours elapsed.`);
 
-    // Check if we need to reset maxTimeAllowed based on the last reset timestamp
+    // Reset check based on lastResetTimestamp
     const lastReset = lastResetTimestamp ? new Date(lastResetTimestamp) : null;
     if (!lastReset || lastReset.getDate() !== now.getDate() || lastReset.getMonth() !== now.getMonth() || lastReset.getFullYear() !== now.getFullYear()) {
-        maxTimeAllowed = defaultMaxTimeAllowed; // Reset maxTimeAllowed for a new day
         console.log("Resetting maxTimeAllowed for a new day.");
+        maxTimeAllowed = defaultMaxTimeAllowed;
+        await browser.storage.local.set({
+            maxTimeAllowed,
+            lastResetTimestamp: now.getTime() // Update lastResetTimestamp to current time
+        });
     } else {
-        maxTimeAllowed = storedMaxTimeAllowed || defaultMaxTimeAllowed; // Use stored value if same day
+        maxTimeAllowed = storedMaxTimeAllowed || defaultMaxTimeAllowed;
     }
-    console.log("Initial maximum time allowed set:", maxTimeAllowed, "seconds");
+    console.log("Max time allowed set:", maxTimeAllowed, "seconds");
 
     let reductionFactor = storedReductionFactor;
     if (!reductionFactor) {
@@ -77,6 +81,7 @@ async function initialize() {
     applyProbabilityCooldown();
     updateIcon();
 }
+
 
 function updateIcon() {
     const canvas = document.createElement('canvas');
@@ -124,12 +129,9 @@ function handleTabUpdate(tabId, changeInfo) {
 }
 
 async function processTabUpdate(tabId, url) {
-    console.log(`Processing update for Tab ${tabId}, URL: ${url}`);
-
+    //console.log(`Processing update for Tab ${tabId}, URL: ${url}`);
     if (isDistractingWebsite(url)) {
-        console.log(`Tab ${tabId} is distracting. Closing other distracting tabs and managing timer.`);
-        await closeAndMarkDistractingTabs(tabId);
-
+        console.log(`Tab ${tabId} is distracting.`);
         if (!tabTimers[tabId]) {
             const timeInterval = await getRandomTimeInterval(tabId);
             console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
@@ -278,16 +280,32 @@ function scheduleDailyReset() {
     const delayUntilMidnight = nextMidnight.getTime() - now.getTime();
 
     browser.alarms.create("dailyReset", { when: Date.now() + delayUntilMidnight });
-    console.log("Scheduled daily reset of maxTimeAllowed.");
+    console.log("Scheduled daily reset of maxTimeAllowed at:", nextMidnight.toString());
 }
+
 
 browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === "dailyReset") {
         console.log("Performing daily reset of maxTimeAllowed.");
+
+        // Update maxTimeAllowed to the default value
         maxTimeAllowed = defaultMaxTimeAllowed;
-        browser.storage.local.set({ maxTimeAllowed, lastResetTimestamp: Date.now() });
+
+        // Get the current time to update lastResetTimestamp
+        const now = new Date().getTime();
+
+        // Update both maxTimeAllowed and lastResetTimestamp in storage
+        browser.storage.local.set({
+            maxTimeAllowed,
+            lastResetTimestamp: now
+        }).then(() => {
+            console.log("Max time allowed and last reset timestamp updated.");
+        }).catch(error => {
+            console.error("Error updating storage:", error);
+        });
     }
 });
+
 
 // Check for reset on startup and attach debounced update handler to tab updates
 async function checkAndPerformResetOnStartup() {
@@ -329,7 +347,7 @@ function increaseCloseProbability() {
 // Decreases likelihood by 2.5% every hour
 async function applyProbabilityCooldown() {
     const hoursElapsed = (Date.now() - lastProbabilityUpdateTime) / (1000 * 60 * 60);
-    const decreaseAmount = 0.025 * hoursElapsed;
+    const decreaseAmount = 0.05 * hoursElapsed;
     browserCloseProbability = Math.max(0, browserCloseProbability - decreaseAmount);
     console.log(`Applied cooldown to close probability, new value: ${(browserCloseProbability * 100).toFixed(2)}%`);
 
@@ -355,6 +373,6 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 
 initialize().then(checkAndPerformResetOnStartup).then(scheduleDailyReset);
-setInterval(applyProbabilityCooldown, 3600000); // Updates browser close probability every hour
+setInterval(applyProbabilityCooldown, 15 * 1000); // Updates browser close probability every hour
 setInterval(calculateReductionFactor, 15 * 1000); // 60 * 1000 ms = 1 minute
 setInterval(updateIcon, 15 * 1000);
