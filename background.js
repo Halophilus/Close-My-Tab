@@ -2,7 +2,7 @@
 let distractingWebsites;
 const defaultDistractingWebsites = [
     "facebook.com", "reddit.com", "redd.it", "imgur.com", "x.com",
-    "pinterest.com", "twitter.com", "instagram.com"
+    "pinterest.com", "twitter.com", "instagram.com", "linkedin.com"
 ];
 
 let tabTimers = {}; // Tracks timers for tabs
