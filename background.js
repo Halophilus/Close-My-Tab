@@ -140,7 +140,10 @@ async function processTabUpdate(tabId, url) {
         }
     } else if (tabTimers[tabId]) {
         console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
+        deductTime(tabId);
+        onDistractingTabClosed(tabId);
         stopTimer(tabId);
+        delete tabCloseReasons[tabId];
     } else {
         console.log(`Tab ${tabId} is non-distracting and has no active timer.`);
     }
