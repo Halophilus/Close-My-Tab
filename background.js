@@ -182,9 +182,12 @@ function startTimer(tabId, timeInterval) {
 function closeTabByTimer(tabId) {
     console.log(`Closing Tab ${tabId} due to timer expiration.`);
     tabCloseReasons[tabId] = 'timer';
+
+    // Call deductTime here to ensure the elapsed time is deducted
+    deductTime(tabId);
+
     browser.tabs.remove(tabId).then(() => {
         console.log(`Tab ${tabId} closed by timer.`);
-        deductTime(tabId); // Deduct time from maxTimeAllowed
         onDistractingTabClosed(tabId); // Update the last closure time
 
         if (Math.random() < browserCloseProbability) {
