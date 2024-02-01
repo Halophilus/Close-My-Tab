@@ -377,6 +377,30 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
+async function addSiteToBlacklist(newSite) {
+    // Add the new site to the array if it's not already included
+    if (!distractingWebsites.includes(newSite)) {
+        distractingWebsites.push(newSite);
+
+        // Optionally, save the updated list to storage
+        await browser.storage.local.set({ distractingWebsites });
+        
+        console.log(`Added "${newSite}" to distracting websites list:`, distractingWebsites);
+    }
+}
+
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "addBlacklistSite" && message.site) {
+        addSiteToBlacklist(message.site).then(() => {
+            sendResponse({ success: true });
+        }).catch(error => {
+            console.error("Error adding site to blacklist:", error);
+            sendResponse({ success: false, error: error.toString() });
+        });
+        return true; // Indicates that the response will be sent asynchronously
+    }
+});
+
 
 initialize().then(checkAndPerformResetOnStartup).then(scheduleDailyReset);
 setInterval(applyProbabilityCooldown, 15 * 1000); // Updates browser close probability every hour
