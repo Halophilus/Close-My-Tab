@@ -407,8 +407,33 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
+async function checkAndResetTimeAllotment() {
+    const { lastResetTimestamp } = await browser.storage.local.get("lastResetTimestamp");
+    const now = new Date();
+    const midnight = new Date(now.setHours(0, 0, 0, 0)); // Set to today's midnight
+
+    // Convert both dates to time for comparison
+    const nowTime = now.getTime();
+    const midnightTime = midnight.getTime();
+
+    // Check if the current time is after the last reset and before the next midnight
+    if (!lastResetTimestamp || nowTime >= midnightTime) {
+        console.log("Resetting maxTimeAllowed to default and setting lastResetTimestamp to the most recent midnight.");
+
+        // Reset maxTimeAllowed to default
+        maxTimeAllowed = defaultMaxTimeAllowed;
+
+        // Update both maxTimeAllowed and lastResetTimestamp in storage
+        await browser.storage.local.set({
+            maxTimeAllowed,
+            lastResetTimestamp: midnightTime // Set to the most recent midnight
+        });
+    }
+}
+
 
 initialize().then(checkAndPerformResetOnStartup).then(scheduleDailyReset);
 setInterval(applyProbabilityCooldown, 15 * 1000); // Updates browser close probability every hour
-setInterval(calculateReductionFactor, 15 * 1000); // 60 * 1000 ms = 1 minute
+setInterval(calculateReductionFactor, 15 * 1000); 
 setInterval(updateIcon, 15 * 1000);
+setInterval(checkAndResetTimeAllotment, 15 * 1000); // 15 * 1000 ms = 15 seconds
