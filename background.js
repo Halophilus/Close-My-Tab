@@ -160,52 +160,65 @@ async function closeAndMarkDistractingTabs(newTabId) {
         delete tabCloseReasons[tab.id];
     }
 }
-function startTimer(tabId, timeInterval) {
-    if (tabTimers[tabId]) {
-        console.log(`Timer for Tab ${tabId} already exists. Restarting.`);
-        stopTimer(tabId);
-    }
 
-    console.log(`Initializing timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
+function startTimer(tabId, timeInterval) {
+    stopTimer(tabId); // Ensure any existing timer is stopped before starting a new one
+
+    console.log(`Starting timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
+    let intervalId = setInterval(() => {
+        if (!tabTimers[tabId]) {
+            console.log(`Timer for Tab ${tabId} no longer exists. Exiting interval.`);
+            clearInterval(intervalId);
+            return;
+        }
+
+        if (tabTimers[tabId].stopped) {
+            console.log(`Timer for Tab ${tabId} is marked as stopped. Exiting interval.`);
+            clearInterval(intervalId);
+            return;
+        }
+
+        let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
+        console.log(`Timer Check for Tab ${tabId}, Elapsed: ${elapsed} seconds`);
+
+        if (elapsed >= timeInterval) {
+            console.log(`Timer expired for Tab ${tabId}. Initiating tab closure.`);
+            closeTabByTimer(tabId);
+        }
+    }, 1000);
+
     tabTimers[tabId] = {
         startTime: Date.now(),
-        timerId: setInterval(() => {
-            // Check if tabTimers[tabId] exists before proceeding
-            if (!tabTimers[tabId]) {
-                console.log(`Timer for Tab ${tabId} no longer exists, stopping interval.`);
-                clearInterval(tabTimers[tabId]?.timerId); // Use optional chaining to avoid errors
-                return; // Exit the interval callback function
-            }
-
-            let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
-            console.log(`Tab ${tabId} Timer Check, Elapsed: ${elapsed} seconds`);
-
-            if (elapsed >= timeInterval) {
-                console.log(`Timer expired for Tab ${tabId}, closing.`);
-                closeTabByTimer(tabId);
-            }
-        }, 1000)
+        timerId: intervalId,
+        stopped: false
     };
 }
 
+function stopTimer(tabId) {
+    if (tabTimers[tabId]) {
+        console.log(`Stopping timer for Tab ${tabId}`);
+        clearInterval(tabTimers[tabId].timerId);
+        tabTimers[tabId].stopped = true;
+        delete tabTimers[tabId];
+    }
+}
+
+
+
 function closeTabByTimer(tabId) {
     console.log(`Closing Tab ${tabId} due to timer expiration.`);
+    if (!tabTimers[tabId]) {
+        console.log(`No timer found for Tab ${tabId} upon closing, possible previous clear.`);
+        return; // Exit if there's no timer to prevent errors
+    }
+
     tabCloseReasons[tabId] = 'timer';
-
-    // Call deductTime here to ensure the elapsed time is deducted
-    deductTime(tabId);
-
+    deductTime(tabId); // Ensure time is deducted before clearing the timer
+    
     browser.tabs.remove(tabId).then(() => {
         console.log(`Tab ${tabId} closed by timer.`);
         onDistractingTabClosed(tabId); // Update the last closure time
-
-        if (Math.random() < browserCloseProbability) {
-            console.log('Probability triggered, closing all tabs.');
-            browser.tabs.query({}).then(tabs => {
-                const tabIds = tabs.map(tab => tab.id);
-                browser.tabs.remove(tabIds);
-            });
-        }
+        stopTimer(tabId); // Make sure to stop the timer after tab closure
     });
 }
 
@@ -220,15 +233,6 @@ browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
     delete tabTimers[tabId];
     delete tabCloseReasons[tabId];
 });
-
-
-function stopTimer(tabId) {
-    if (tabTimers[tabId]) {
-        console.log(`Stopping timer for Tab ${tabId}`);
-        clearInterval(tabTimers[tabId].timerId);
-        delete tabTimers[tabId];
-    }
-}
 
 function deductTime(tabId) {
     if (!tabTimers[tabId]) return;
@@ -269,12 +273,12 @@ async function calculateReductionFactor() {
     reductionFactor = Math.min(Math.max(reductionFactor, 0), 1);
     browser.storage.local.set({ reductionFactor: reductionFactor })
         .then(() => {
-        console.log(`Reduction factor updated and stored: ${reductionFactor}`);
+        //console.log(`Reduction factor updated and stored: ${reductionFactor}`);
         })
         .catch(error => {
         console.error("Error updating and storing reduction factor:", error);
         });
-    console.log(`Reduction factor calculated: ${reductionFactor}, based on ${elapsedTime} seconds since last distracting tab closure.`);
+    //console.log(`Reduction factor calculated: ${reductionFactor}, based on ${elapsedTime} seconds since last distracting tab closure.`);
     return reductionFactor;
 }
 
@@ -327,7 +331,7 @@ async function checkAndPerformResetOnStartup() {
     const lastReset = lastResetTimestamp ? new Date(lastResetTimestamp) : null;
 
     if (!lastReset || lastReset.getDate() !== now.getDate()) {
-        console.log("Reset required, performing now.");
+        console.log("Daily reset required, performing now.");
         maxTimeAllowed = defaultMaxTimeAllowed;
         browser.storage.local.set({ maxTimeAllowed, lastResetTimestamp: now.getTime() });
     } else {
@@ -361,7 +365,7 @@ async function applyProbabilityCooldown() {
     const hoursElapsed = (Date.now() - lastProbabilityUpdateTime) / (1000 * 60 * 60);
     const decreaseAmount = 0.05 * hoursElapsed;
     browserCloseProbability = Math.max(0, browserCloseProbability - decreaseAmount);
-    console.log(`Applied cooldown to close probability, new value: ${(browserCloseProbability * 100).toFixed(2)}%`);
+    //console.log(`Applied cooldown to close probability, new value: ${(browserCloseProbability * 100).toFixed(2)}%`);
 
     // Update the last update time and save the new probability
     lastProbabilityUpdateTime = Date.now();
@@ -410,15 +414,14 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function checkAndResetTimeAllotment() {
     const { lastResetTimestamp } = await browser.storage.local.get("lastResetTimestamp");
     const now = new Date();
-    const midnight = new Date(now.setHours(0, 0, 0, 0)); // Set to today's midnight
+    const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours ago from now
 
-    // Convert both dates to time for comparison
-    const nowTime = now.getTime();
-    const midnightTime = midnight.getTime();
+    // Convert the lastResetTimestamp to a Date object for comparison
+    const lastReset = lastResetTimestamp ? new Date(lastResetTimestamp) : null;
 
-    // Check if the current time is after the last reset and before the next midnight
-    if (!lastResetTimestamp || nowTime >= midnightTime) {
-        console.log("Resetting maxTimeAllowed to default and setting lastResetTimestamp to the most recent midnight.");
+    // Check if more than 24 hours have passed since the last reset
+    if (lastReset && lastReset <= twentyFourHoursAgo) {
+        //console.log("More than 24 hours have passed since the last reset. Resetting maxTimeAllowed.");
 
         // Reset maxTimeAllowed to default
         maxTimeAllowed = defaultMaxTimeAllowed;
@@ -426,10 +429,13 @@ async function checkAndResetTimeAllotment() {
         // Update both maxTimeAllowed and lastResetTimestamp in storage
         await browser.storage.local.set({
             maxTimeAllowed,
-            lastResetTimestamp: midnightTime // Set to the most recent midnight
+            lastResetTimestamp: now.getTime() // Update lastResetTimestamp to current time
         });
+    } else {
+        //console.log("Less than 24 hours have passed since the last reset. No reset needed at this time.");
     }
 }
+
 
 
 initialize().then(checkAndPerformResetOnStartup).then(scheduleDailyReset);
