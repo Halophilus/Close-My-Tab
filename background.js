@@ -8,6 +8,7 @@ const defaultDistractingWebsites = [
 let tabTimers = {}; // Tracks timers for tabs
 let tabCloseReasons = {}; // Tracks reasons for tab closures
 let updateTimeouts = {}; // For debouncing tab updates
+let tabNavigationHistory = {}; // Example: {tabId: ["previousUrl", "currentUrl"]}
 let maxTimeAllowed; // Dynamically updated based on usage
 let browserCloseProbability = 0; // Probability of all tabs closing
 let lastProbabilityUpdateTime = Date.now(); // Last time the probability was updated
@@ -128,11 +129,18 @@ function handleTabUpdate(tabId, changeInfo) {
     }, 100); // Adjust debounce time as needed
 }
 
+
 async function processTabUpdate(tabId, url) {
-    //console.log(`Processing update for Tab ${tabId}, URL: ${url}`);
     if (isDistractingWebsite(url)) {
         console.log(`Tab ${tabId} is distracting.`);
-        if (!tabTimers[tabId]) {
+
+        // Check if the tab came from an allowed context and doesn't already have a timer
+        let previousUrl = tabNavigationHistory[tabId] && tabNavigationHistory[tabId].length > 1 ? tabNavigationHistory[tabId][tabNavigationHistory[tabId].length - 2] : null;
+        if (!tabTimers[tabId] && previousUrl && isAllowedContext(previousUrl)) {
+            console.log(`Tab ${tabId} navigated from an allowed context. Starting grace period.`);
+            startGracePeriodTimer(tabId, 90); // 1.5 minutes grace period
+        } else if (!tabTimers[tabId]) {
+            // Start the distraction-limiting timer immediately if not navigated from an allowed context
             const timeInterval = await getRandomTimeInterval(tabId);
             console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
             startTimer(tabId, timeInterval);
@@ -147,6 +155,45 @@ async function processTabUpdate(tabId, url) {
     } else {
         console.log(`Tab ${tabId} is non-distracting and has no active timer.`);
     }
+}
+
+function startGracePeriodTimer(tabId, gracePeriod) {
+    stopTimer(tabId); // Ensure no existing timer is running
+
+    let gracePeriodId = setTimeout(() => {
+        // Grace period ended, check if still on a distracting site
+        browser.tabs.get(tabId).then(tab => {
+            if (tab && isDistractingWebsite(tab.url)) {
+                // Fetch the time interval and start the regular timer asynchronously
+                fetchAndStartTimer(tabId);
+            }
+        }).catch(error => console.error("Error getting tab info:", error));
+    }, gracePeriod * 1000); // Convert seconds to milliseconds
+
+    tabTimers[tabId] = {
+        startTime: Date.now(),
+        timerId: gracePeriodId,
+        stopped: false,
+        isGracePeriod: true // Mark this timer as a grace period timer
+    };
+}
+
+async function fetchAndStartTimer(tabId) {
+    const timeInterval = await getRandomTimeInterval(tabId);
+    console.log(`Starting regular timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
+    startTimer(tabId, timeInterval);
+}
+
+function isAllowedContext(url) {
+    // List of allowed contexts (search engines in this example)
+    const allowedContexts = [
+        'https://www.google.com/search',
+        'https://www.bing.com/search',
+        'https://duckduckgo.com/'
+    ];
+
+    // Check if the URL starts with any of the allowed contexts
+    return allowedContexts.some(allowedUrl => url.startsWith(allowedUrl));
 }
 
 async function closeAndMarkDistractingTabs(newTabId) {
@@ -299,6 +346,20 @@ function scheduleDailyReset() {
     console.log("Scheduled daily reset of maxTimeAllowed at:", nextMidnight.toString());
 }
 
+browser.webNavigation.onCommitted.addListener(details => {
+    if (details.frameId === 0) { // 0 indicates the main frame
+        const { tabId, url } = details;
+        if (!tabNavigationHistory[tabId]) {
+            tabNavigationHistory[tabId] = [];
+        }
+        tabNavigationHistory[tabId].push(url);
+
+        // Keep history manageable, consider only the last 2 entries
+        if (tabNavigationHistory[tabId].length > 2) {
+            tabNavigationHistory[tabId].shift(); // Remove the oldest entry
+        }
+    }
+});
 
 browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === "dailyReset") {
