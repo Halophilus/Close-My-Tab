@@ -212,16 +212,26 @@ function startTimer(tabId, timeInterval) {
     stopTimer(tabId); // Ensure any existing timer is stopped before starting a new one
 
     console.log(`Starting timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
-    let intervalId = setInterval(() => {
-        if (!tabTimers[tabId]) {
-            console.log(`Timer for Tab ${tabId} no longer exists. Exiting interval.`);
+    let intervalId = setInterval(async () => {
+        if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
+            console.log(`Timer for Tab ${tabId} no longer exists or is marked as stopped. Exiting interval.`);
             clearInterval(intervalId);
+            delete tabTimers[tabId]; // Ensure cleanup if the timer is stopped or doesn't exist
             return;
         }
 
-        if (tabTimers[tabId].stopped) {
-            console.log(`Timer for Tab ${tabId} is marked as stopped. Exiting interval.`);
+        try {
+            let tab = await browser.tabs.get(tabId);
+            if (!tab) {
+                console.log(`Tab ${tabId} does not exist. Stopping timer.`);
+                clearInterval(intervalId);
+                delete tabTimers[tabId]; // Cleanup since tab no longer exists
+                return;
+            }
+        } catch (error) {
+            console.error(`Error getting Tab ${tabId}:`, error);
             clearInterval(intervalId);
+            delete tabTimers[tabId]; // Cleanup in case of an error fetching tab details
             return;
         }
 
@@ -241,8 +251,18 @@ function startTimer(tabId, timeInterval) {
     };
 }
 
+function checkAndHandleAllotmentExpiry() {
+    if (maxTimeAllowed <= 0) {
+        console.log(`Allotment spent. Disabling all active timers.`)
+        Object.keys(tabTimers).forEach(tabId => {
+            stopTimer(tabId);
+            delete tabTimers[tabId];
+        });
+    }
+}
+
 function stopTimer(tabId) {
-    if (tabTimers[tabId]) {
+    if (tabTimers[tabId] && tabTimers[tabId].timerId) {
         console.log(`Stopping timer for Tab ${tabId}`);
         clearInterval(tabTimers[tabId].timerId);
         tabTimers[tabId].stopped = true;
@@ -270,14 +290,20 @@ function closeTabByTimer(tabId) {
 }
 
 browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
-    if (tabCloseReasons[tabId] !== 'timer' && tabTimers[tabId]) {
-        console.log(`Distracting Tab ${tabId} closed by the user.`);
-        deductTime(tabId); // Deduct time from maxTimeAllowed
-        onDistractingTabClosed(tabId); // Update the last closure time
+    if (tabTimers[tabId] && tabTimers[tabId].isGracePeriod) {
+        console.log(`Distracting Tab ${tabId} closed during grace period. Not affecting reduction factor.`);
+        // Grace period cleanup
+        stopTimer(tabId);  // Ensure the grace period timer is stopped
+        delete tabTimers[tabId];  // Remove the timer entry for this tab
+    } else if (tabTimers[tabId]) {
+        console.log(`Distracting Tab ${tabId} closed after grace period.`);
+        deductTime(tabId);  // Deduct time from maxTimeAllowed
+        onDistractingTabClosed(tabId);  // Update the last closure time, affecting reduction factor
+        stopTimer(tabId);  // Stop the timer
+        delete tabTimers[tabId];  // Remove the timer entry for this tab
     }
 
-    // Cleanup
-    delete tabTimers[tabId];
+    // Cleanup for any tab, regardless of grace period or timer status
     delete tabCloseReasons[tabId];
 });
 
@@ -504,3 +530,4 @@ setInterval(applyProbabilityCooldown, 15 * 1000); // Updates browser close proba
 setInterval(calculateReductionFactor, 15 * 1000); 
 setInterval(updateIcon, 15 * 1000);
 setInterval(checkAndResetTimeAllotment, 15 * 1000); // 15 * 1000 ms = 15 seconds
+setInterval(checkAndHandleAllotmentExpiry, 300000);

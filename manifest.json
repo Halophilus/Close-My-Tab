@@ -1,7 +1,7 @@
 {
     "manifest_version": 2,
     "name": "Close My Tab",
-    "version": "1.9",
+    "version": "1.10",
     "description": "A browser extension to manage time spent on distracting websites.",
     "icons": {
         "16": "icons/16.png",
