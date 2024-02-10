@@ -1,7 +1,7 @@
 {
     "manifest_version": 2,
     "name": "Close My Tab",
-    "version": "1.11",
+    "version": "1.10",
     "description": "A browser extension to manage time spent on distracting websites.",
     "icons": {
         "16": "icons/16.png",
@@ -19,20 +19,16 @@
     "permissions": [
         "storage",
         "tabs",
-        "activeTab",
         "alarms",
         "webNavigation",
         "<all_urls>"
     ],
     "background": {
         "scripts": ["background.js"]
-        
     },
     "content_scripts": [
         {
-            "matches": ["<all_urls>"],
-            "js": ["content-script.js"],
-            "run_at": "document_start"
+            "matches": ["<all_urls>"]
         }
     ]
 }

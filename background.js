@@ -9,7 +9,7 @@ let tabTimers = {}; // Tracks timers for tabs
 let tabCloseReasons = {}; // Tracks reasons for tab closures
 let updateTimeouts = {}; // For debouncing tab updates
 let tabNavigationHistory = {}; // Example: {tabId: ["previousUrl", "currentUrl"]}
-let gracePeriodDebounceTimeouts = {}; // Tracks debounce timeouts for grace period evaluations
+let gracePeriodDebounceTimeouts = {}; 
 let maxTimeAllowed; // Dynamically updated based on usage
 let browserCloseProbability = 0; // Probability of all tabs closing
 let lastProbabilityUpdateTime = Date.now(); // Last time the probability was updated
@@ -124,48 +124,47 @@ function handleTabUpdate(tabId, changeInfo) {
         console.log(`Debouncing: Cleared previous timeout for Tab ${tabId}`);
     }
 
-    updateTimeouts[tabId] = setTimeout(async () => {
-        if (tabTimers[tabId] && tabTimers[tabId].isGracePeriod) {
-            // If the tab is in a grace period and navigates to another distracting site, end the grace period
-            console.log(`Tab ${tabId} was in a grace period but navigated to another distracting site. Ending grace period.`);
-            stopTimer(tabId); // Stop the grace period timer
-            // Immediately start the distraction-limiting timer with penalties
-            const timeInterval = await getRandomTimeInterval(tabId);
-            startTimer(tabId, timeInterval);
-            increaseCloseProbability(); // Apply penalties
-        } else {
-            // Handle tab update normally if not in a grace period
-            processTabUpdate(tabId, changeInfo.url);
-        }
+    updateTimeouts[tabId] = setTimeout(() => {
+        processTabUpdate(tabId, changeInfo.url);
         delete updateTimeouts[tabId];
     }, 100); // Adjust debounce time as needed
 }
-
 
 async function processTabUpdate(tabId, url) {
     if (isDistractingWebsite(url)) {
         console.log(`Tab ${tabId} is distracting.`);
 
-        // Debounce the grace period evaluation
-        if (gracePeriodDebounceTimeouts[tabId]) {
-            clearTimeout(gracePeriodDebounceTimeouts[tabId]);
-            console.log(`Debouncing grace period evaluation for Tab ${tabId}`);
+        // Check if the tab is currently in a grace period and navigates to another distracting site
+        if (tabTimers[tabId] && tabTimers[tabId].isGracePeriod) {
+            console.log(`Tab ${tabId} was in a grace period but navigated to another distracting site. Ending grace period and starting timer.`);
+            clearTimeout(tabTimers[tabId].timerId); // Clear the grace period timer
+            delete tabTimers[tabId].isGracePeriod; // Remove the grace period flag
+            const timeInterval = await getRandomTimeInterval(tabId);
+            startTimer(tabId, timeInterval); // Start the timer immediately
+            return; // Prevent further execution to avoid re-evaluation of grace period
         }
 
-        gracePeriodDebounceTimeouts[tabId] = setTimeout(async () => {
-            let previousUrl = tabNavigationHistory[tabId] && tabNavigationHistory[tabId].length > 1 ? tabNavigationHistory[tabId][tabNavigationHistory[tabId].length - 2] : null;
-            if (!tabTimers[tabId] && previousUrl && isAllowedContext(previousUrl) && url.length > 30) {
-                console.log(`Tab ${tabId} navigated from an allowed context and the URL is longer than 30 characters. Starting grace period.`);
-                startGracePeriodTimer(tabId, 90); // 1.5 minutes grace period
-            } else if (!tabTimers[tabId]) {
-                // Start the distraction-limiting timer immediately if not navigated from an allowed context or if the URL is shorter than or equal to 30 characters
-                const timeInterval = await getRandomTimeInterval(tabId);
-                console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
-                startTimer(tabId, timeInterval);
-                increaseCloseProbability(); // Debounced increase of close probability
+        // Debounce the grace period evaluation for new navigations
+        if (!tabTimers[tabId]) {
+            if (gracePeriodDebounceTimeouts[tabId]) {
+                clearTimeout(gracePeriodDebounceTimeouts[tabId]);
+                console.log(`Debouncing grace period evaluation for Tab ${tabId}`);
             }
-            delete gracePeriodDebounceTimeouts[tabId];
-        }, 2000); // 500 ms debounce time
+
+            gracePeriodDebounceTimeouts[tabId] = setTimeout(async () => {
+                let previousUrl = tabNavigationHistory[tabId] && tabNavigationHistory[tabId].length > 1 ? tabNavigationHistory[tabId][tabNavigationHistory[tabId].length - 2] : null;
+                if (previousUrl && isAllowedContext(previousUrl) && url.length > 50) {
+                    console.log(`Tab ${tabId} navigated from an allowed context with URL length > 30. Starting grace period.`);
+                    startGracePeriodTimer(tabId, 90); // Adjust grace period as needed
+                } else {
+                    console.log(`Starting active timer for Tab ${tabId}.`);
+                    const timeInterval = await getRandomTimeInterval(tabId);
+                    startTimer(tabId, timeInterval); // Start actively deducting time from maxTimeAllowed
+                    increaseCloseProbability(); // Debounced increase of close probability
+                }
+                delete gracePeriodDebounceTimeouts[tabId];
+            }, 2000); // Adjust debounce time as needed
+        }
     } else if (tabTimers[tabId]) {
         console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
         deductTime(tabId);
@@ -181,23 +180,35 @@ async function processTabUpdate(tabId, url) {
 function startGracePeriodTimer(tabId, gracePeriod) {
     stopTimer(tabId); // Ensure no existing timer is running
 
-    let gracePeriodId = setTimeout(() => {
-        // Grace period ended, check if still on a distracting site
+    let gracePeriodId = setInterval(() => {
+        if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
+            console.log(`Grace period for Tab ${tabId} ended.`);
+            clearInterval(gracePeriodId);
+            delete tabTimers[tabId];
+            return;
+        }
+
         browser.tabs.get(tabId).then(tab => {
-            if (tab && isDistractingWebsite(tab.url)) {
-                // Fetch the time interval and start the regular timer asynchronously
-                fetchAndStartTimer(tabId);
+            if (!(tab && isDistractingWebsite(tab.url))) {
+                console.log(`Tab ${tabId} no longer on a distracting site. Stopping grace period.`);
+                clearInterval(gracePeriodId);
+                delete tabTimers[tabId];
             }
-        }).catch(error => console.error("Error getting tab info:", error));
-    }, gracePeriod * 1000); // Convert seconds to milliseconds
+        }).catch(error => {
+            console.error(`Error checking Tab ${tabId} during grace period:`, error);
+            clearInterval(gracePeriodId);
+            delete tabTimers[tabId];
+        });
+    }, 1000); // Check every second
 
     tabTimers[tabId] = {
         startTime: Date.now(),
         timerId: gracePeriodId,
         stopped: false,
-        isGracePeriod: true // Mark this timer as a grace period timer
+        isGracePeriod: true
     };
 }
+
 
 async function fetchAndStartTimer(tabId) {
     const timeInterval = await getRandomTimeInterval(tabId);
@@ -233,60 +244,44 @@ function startTimer(tabId, timeInterval) {
     stopTimer(tabId); // Ensure any existing timer is stopped before starting a new one
 
     console.log(`Starting timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
+    let intervalId = setInterval(async () => {
+        if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
+            console.log(`Timer for Tab ${tabId} no longer exists or is marked as stopped. Exiting interval.`);
+            clearInterval(intervalId);
+            delete tabTimers[tabId]; // Ensure cleanup if the timer is stopped or doesn't exist
+            return;
+        }
 
-    // Inject the content script into the tab to display the timer
-    browser.tabs.executeScript(tabId, {file: 'content-script.js', runAt: 'document_start'}).then(() => {
-        // Content script injected, now safe to start the timer
-        let intervalId = setInterval(async () => {
-            if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
-                console.log(`Timer for Tab ${tabId} no longer exists or is marked as stopped. Exiting interval.`);
+        try {
+            let tab = await browser.tabs.get(tabId);
+            if (!tab) {
+                console.log(`Tab ${tabId} does not exist. Stopping timer.`);
                 clearInterval(intervalId);
-                delete tabTimers[tabId]; // Ensure cleanup if the timer is stopped or doesn't exist
+                delete tabTimers[tabId]; // Cleanup since tab no longer exists
                 return;
             }
+        } catch (error) {
+            console.error(`Error getting Tab ${tabId}:`, error);
+            clearInterval(intervalId);
+            delete tabTimers[tabId]; // Cleanup in case of an error fetching tab details
+            return;
+        }
 
-            try {
-                let tab = await browser.tabs.get(tabId);
-                if (!tab) {
-                    console.log(`Tab ${tabId} does not exist. Stopping timer.`);
-                    clearInterval(intervalId);
-                    delete tabTimers[tabId]; // Cleanup since tab no longer exists
-                    return;
-                }
-            } catch (error) {
-                console.error(`Error getting Tab ${tabId}:`, error);
-                clearInterval(intervalId);
-                delete tabTimers[tabId]; // Cleanup in case of an error fetching tab details
-                return;
-            }
+        let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
+        console.log(`Timer Check for Tab ${tabId}, Elapsed: ${elapsed} seconds`);
 
-            let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
-            let timeLeft = Math.max(0, timeInterval - elapsed);
-            console.log(`Timer Check for Tab ${tabId}, Elapsed: ${elapsed} seconds, Time left: ${timeLeft} seconds`);
+        if (elapsed >= timeInterval) {
+            console.log(`Timer expired for Tab ${tabId}. Initiating tab closure.`);
+            closeTabByTimer(tabId);
+        }
+    }, 1000);
 
-            // Send the remaining time to the content script to update the display
-            browser.tabs.sendMessage(tabId, {action: 'updateTimer', timeLeft: Math.round(timeLeft)}).catch(error => {
-                console.error(`Error sending update to Tab ${tabId}:`, error);
-            });
-
-            if (elapsed >= timeInterval) {
-                console.log(`Timer expired for Tab ${tabId}. Initiating tab closure.`);
-                clearInterval(intervalId); // Stop the interval before closing the tab to avoid errors
-                closeTabByTimer(tabId);
-            }
-        }, 1000);
-
-        tabTimers[tabId] = {
-            startTime: Date.now(),
-            timerId: intervalId,
-            stopped: false
-        };
-    }).catch(error => {
-        console.error(`Error injecting content script for Tab ${tabId}:`, error);
-    });
+    tabTimers[tabId] = {
+        startTime: Date.now(),
+        timerId: intervalId,
+        stopped: false
+    };
 }
-
-
 
 function checkAndHandleAllotmentExpiry() {
     if (maxTimeAllowed <= 0) {
@@ -360,8 +355,7 @@ function deductTime(tabId) {
 async function getRandomTimeInterval(tabId) {
     const reductionFactor = await calculateReductionFactor();
     const remainingTime = Math.max(0, maxTimeAllowed); // Ensure it doesn't go below 0
-    //const interval = Math.floor(Math.max(Math.random(), 0.1) * remainingTime * reductionFactor) + 1;
-    const interval = Math.floor(remainingTime * reductionFactor) + 1; // Eliminate randomness from the time interval
+    const interval = Math.floor(Math.max(Math.random(), 0.1) * remainingTime * reductionFactor) + 1;
     console.log(`Calculated random time interval for Tab ${tabId}: ${interval} seconds, within remaining maxTimeAllowed: ${remainingTime} seconds.`);
     return interval;
 }
