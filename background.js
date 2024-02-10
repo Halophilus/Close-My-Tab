@@ -131,6 +131,7 @@ function handleTabUpdate(tabId, changeInfo) {
 }
 
 async function processTabUpdate(tabId, url) {
+    browser.tabs.sendMessage(tabId, { action: 'hideTimer' }).catch(console.error);
     if (isDistractingWebsite(url)) {
         console.log(`Tab ${tabId} is distracting.`);
 
@@ -321,6 +322,7 @@ function stopTimer(tabId) {
         clearInterval(tabTimers[tabId].timerId);
         tabTimers[tabId].stopped = true;
         delete tabTimers[tabId];
+        browser.tabs.sendMessage(tabId, { action: 'hideTimer' }).catch(console.error);
     }
 }
 
