@@ -233,44 +233,60 @@ function startTimer(tabId, timeInterval) {
     stopTimer(tabId); // Ensure any existing timer is stopped before starting a new one
 
     console.log(`Starting timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
-    let intervalId = setInterval(async () => {
-        if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
-            console.log(`Timer for Tab ${tabId} no longer exists or is marked as stopped. Exiting interval.`);
-            clearInterval(intervalId);
-            delete tabTimers[tabId]; // Ensure cleanup if the timer is stopped or doesn't exist
-            return;
-        }
 
-        try {
-            let tab = await browser.tabs.get(tabId);
-            if (!tab) {
-                console.log(`Tab ${tabId} does not exist. Stopping timer.`);
+    // Inject the content script into the tab to display the timer
+    browser.tabs.executeScript(tabId, {file: 'content-script.js', runAt: 'document_start'}).then(() => {
+        // Content script injected, now safe to start the timer
+        let intervalId = setInterval(async () => {
+            if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
+                console.log(`Timer for Tab ${tabId} no longer exists or is marked as stopped. Exiting interval.`);
                 clearInterval(intervalId);
-                delete tabTimers[tabId]; // Cleanup since tab no longer exists
+                delete tabTimers[tabId]; // Ensure cleanup if the timer is stopped or doesn't exist
                 return;
             }
-        } catch (error) {
-            console.error(`Error getting Tab ${tabId}:`, error);
-            clearInterval(intervalId);
-            delete tabTimers[tabId]; // Cleanup in case of an error fetching tab details
-            return;
-        }
 
-        let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
-        console.log(`Timer Check for Tab ${tabId}, Elapsed: ${elapsed} seconds`);
+            try {
+                let tab = await browser.tabs.get(tabId);
+                if (!tab) {
+                    console.log(`Tab ${tabId} does not exist. Stopping timer.`);
+                    clearInterval(intervalId);
+                    delete tabTimers[tabId]; // Cleanup since tab no longer exists
+                    return;
+                }
+            } catch (error) {
+                console.error(`Error getting Tab ${tabId}:`, error);
+                clearInterval(intervalId);
+                delete tabTimers[tabId]; // Cleanup in case of an error fetching tab details
+                return;
+            }
 
-        if (elapsed >= timeInterval) {
-            console.log(`Timer expired for Tab ${tabId}. Initiating tab closure.`);
-            closeTabByTimer(tabId);
-        }
-    }, 1000);
+            let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
+            let timeLeft = Math.max(0, timeInterval - elapsed);
+            console.log(`Timer Check for Tab ${tabId}, Elapsed: ${elapsed} seconds, Time left: ${timeLeft} seconds`);
 
-    tabTimers[tabId] = {
-        startTime: Date.now(),
-        timerId: intervalId,
-        stopped: false
-    };
+            // Send the remaining time to the content script to update the display
+            browser.tabs.sendMessage(tabId, {action: 'updateTimer', timeLeft: Math.round(timeLeft)}).catch(error => {
+                console.error(`Error sending update to Tab ${tabId}:`, error);
+            });
+
+            if (elapsed >= timeInterval) {
+                console.log(`Timer expired for Tab ${tabId}. Initiating tab closure.`);
+                clearInterval(intervalId); // Stop the interval before closing the tab to avoid errors
+                closeTabByTimer(tabId);
+            }
+        }, 1000);
+
+        tabTimers[tabId] = {
+            startTime: Date.now(),
+            timerId: intervalId,
+            stopped: false
+        };
+    }).catch(error => {
+        console.error(`Error injecting content script for Tab ${tabId}:`, error);
+    });
 }
+
+
 
 function checkAndHandleAllotmentExpiry() {
     if (maxTimeAllowed <= 0) {
