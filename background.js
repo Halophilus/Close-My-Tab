@@ -167,7 +167,7 @@ async function processTabUpdate(tabId, url) {
         }
     } else if (tabTimers[tabId]) {
         console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
-        deductTime(tabId);
+        // deductTime(tabId);
         onDistractingTabClosed(tabId);
         stopTimer(tabId);
         delete tabCloseReasons[tabId];
@@ -240,10 +240,23 @@ async function closeAndMarkDistractingTabs(newTabId) {
     }
 }
 
+
+
 function startTimer(tabId, timeInterval) {
     stopTimer(tabId); // Ensure any existing timer is stopped before starting a new one
 
     console.log(`Starting timer for Tab ${tabId}, Duration: ${timeInterval} seconds`);
+    
+    // Inject the content script into the tab
+    browser.tabs.executeScript(tabId, {
+        file: "/content-script.js", // Specify the path to your content script
+        runAt: 'document_start' // Ensure the script runs before the webpage is fully loaded
+    }).then(() => {
+        console.log(`Content script injected into Tab ${tabId}`);
+    }).catch(error => {
+        console.error(`Error injecting content script into Tab ${tabId}:`, error);
+    });    
+
     let intervalId = setInterval(async () => {
         if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
             console.log(`Timer for Tab ${tabId} no longer exists or is marked as stopped. Exiting interval.`);
@@ -267,11 +280,19 @@ function startTimer(tabId, timeInterval) {
             return;
         }
 
+        // Deduct one second from maxTimeAllowed every tick
+        maxTimeAllowed = Math.max(0, maxTimeAllowed - 1);
+        console.log(`Deducted 1 second from maxTimeAllowed. New maxTimeAllowed: ${maxTimeAllowed} seconds.`);
+
+        // Send a message to the content script in the tab to update the displayed timer
+        browser.tabs.sendMessage(tabId, { action: 'updateTimer', timeLeft: maxTimeAllowed });
+
         let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
         console.log(`Timer Check for Tab ${tabId}, Elapsed: ${elapsed} seconds`);
 
-        if (elapsed >= timeInterval) {
-            console.log(`Timer expired for Tab ${tabId}. Initiating tab closure.`);
+        if (elapsed >= timeInterval || maxTimeAllowed <= 0) {
+            console.log(`Timer expired for Tab ${tabId} or maxTimeAllowed reached 0. Initiating tab closure.`);
+            clearInterval(intervalId); // Stop the timer
             closeTabByTimer(tabId);
         }
     }, 1000);
@@ -282,6 +303,7 @@ function startTimer(tabId, timeInterval) {
         stopped: false
     };
 }
+
 
 function checkAndHandleAllotmentExpiry() {
     if (maxTimeAllowed <= 0) {
@@ -312,7 +334,7 @@ function closeTabByTimer(tabId) {
     }
 
     tabCloseReasons[tabId] = 'timer';
-    deductTime(tabId); // Ensure time is deducted before clearing the timer
+    // deductTime(tabId); // Ensure time is deducted before clearing the timer
     
     browser.tabs.remove(tabId).then(() => {
         console.log(`Tab ${tabId} closed by timer.`);
@@ -329,7 +351,7 @@ browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
         delete tabTimers[tabId];  // Remove the timer entry for this tab
     } else if (tabTimers[tabId]) {
         console.log(`Distracting Tab ${tabId} closed after grace period.`);
-        deductTime(tabId);  // Deduct time from maxTimeAllowed
+        // deductTime(tabId);  // Deduct time from maxTimeAllowed
         onDistractingTabClosed(tabId);  // Update the last closure time, affecting reduction factor
         stopTimer(tabId);  // Stop the timer
         delete tabTimers[tabId];  // Remove the timer entry for this tab
