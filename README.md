@@ -4,7 +4,7 @@
 
 This Firefox extension is designed to help users manage their time on distracting websites more effectively. By setting time limits and enforcing cooldown periods, it encourages more disciplined browsing habits.
 
-It encourages producitve browsing habits by stochastically assigning time limits to tabs containing distracting content. Every second spent on a distracting website decrements from a time allotment. Every time a distracting tab is closed, there is a period where the stochastic time limits are multiplied by a reducing factor that approaches 1 after a 90 minute cooldown. Every time a distracting tab is opened, the likelihood of a browser closing event at the end of the timer increases by 5%. This probability decrements by 2.5% every hour. At midnight, time allotment resets, but any remaining cooldown depends on user behavior. This was designed as a means of discouraging compulsive browsing behaviors that impede the productive use of the internet.
+It encourages producitve browsing habits by assigning time limits to tabs containing distracting content. Every second spent on a distracting website decrements from a time allotment. Every time a distracting tab is closed, there is a period where the time limits are multiplied by a reducing factor that approaches 1 after a 90 minute cooldown. Every time a distracting tab is opened, the likelihood of a browser closing event at the end of the timer increases by 5%. This probability decrements by 2.5% every hour. At midnight, time allotment resets, but any remaining cooldown depends on user behavior. This was designed as a means of discouraging compulsive browsing behaviors that impede the productive use of the internet.
 
 The goal of productivity apps shouldn't be to shame and infantalize users into adopting behaviors that don't come to them organically, it should be to create boundaries that arne't overly-restrictive that force the user to think about short and long-term consequences of absent-mindedly sleepwalking through the internet and remind them of the value of their free time.
 
@@ -17,12 +17,15 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 
 ### Time Limits
 - A daily time allowance (`maxTimeAllowed`) is set for browsing distracting websites.
+- While this timer is running, time is actively being deducted from the daily time allowance.
+- When vistiting a distracting web page, this value is shown at the top of the page, forcing the user to scroll all the way up to check it.
+    - This timer dynamically reflects the time remaining in the allowance, reflecting multiple concurrent timers from multiple tabs.
 - Each session on a distracting website is timed, and the duration is deducted from the daily allowance.
 - Multiple distracting tabs can be opened concurrently, but concurrent timers compound the time deducted from a daily allotment. 
 - If the user navigates from a distracting site to a second distracting site within the same tab, the timer persists with the original allowance.
 
-### Random Time Intervals
-- When a user navigates to a distracting website, a random timer starts, the duration of which is within the remaining daily allowance.
+### Time Intervals
+- When a user navigates to a distracting website, a timer starts, the duration of which is within the remaining daily allowance.
 - Once the timer ends, the tab is automatically closed.
 - This time interval is not revealed to the user.
 - This timer ends at the end of its random interval, if the tab is closed, or if the user navigates to a non-distracting site within the tab.
@@ -37,6 +40,11 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 - This event only applies to tabs that are closed by a timer, and will not occur when a tab is closed by the user.
 - This probability increases by 5% with each new distracting tab opened and decreases by 2.5% every hour.
 - Browser close probability increases when a tab is opened, meaning there is always the possibility that running out the clock on a distracting tab will close all of your tabs.
+
+## Grace Periods
+- Some distracting websites are valuable research resources beyond their potential for distraction.
+- This extension provides grace periods for distracting websites accessed through search engines.
+- Homepage URLs / low char URLs belonging to distracting sites do not warrant this grace period, and are appropriately blocked.
 
 ### Persistence and Reset
 - All relevant values are stored within extension storage, allowing for consistent behavior between browser/OS resets.
