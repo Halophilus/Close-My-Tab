@@ -41,7 +41,7 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 - This probability increases by 5% with each new distracting tab opened and decreases by 2.5% every hour.
 - Browser close probability increases when a tab is opened, meaning there is always the possibility that running out the clock on a distracting tab will close all of your tabs.
 
-## Grace Periods
+### Grace Periods
 - Some distracting websites are valuable research resources beyond their potential for distraction.
 - This extension provides grace periods for distracting websites accessed through search engines.
 - Homepage URLs / low char URLs belonging to distracting sites do not warrant this grace period, and are appropriately blocked.
