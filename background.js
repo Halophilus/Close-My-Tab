@@ -9,6 +9,7 @@ let tabTimers = {}; // Tracks timers for tabs
 let tabCloseReasons = {}; // Tracks reasons for tab closures
 let updateTimeouts = {}; // For debouncing tab updates
 let tabNavigationHistory = {}; // Example: {tabId: ["previousUrl", "currentUrl"]}
+let gracePeriodDebounceTimeouts = {}; // Tracks debounce timeouts for grace period evaluations
 let maxTimeAllowed; // Dynamically updated based on usage
 let browserCloseProbability = 0; // Probability of all tabs closing
 let lastProbabilityUpdateTime = Date.now(); // Last time the probability was updated
@@ -123,8 +124,19 @@ function handleTabUpdate(tabId, changeInfo) {
         console.log(`Debouncing: Cleared previous timeout for Tab ${tabId}`);
     }
 
-    updateTimeouts[tabId] = setTimeout(() => {
-        processTabUpdate(tabId, changeInfo.url);
+    updateTimeouts[tabId] = setTimeout(async () => {
+        if (tabTimers[tabId] && tabTimers[tabId].isGracePeriod) {
+            // If the tab is in a grace period and navigates to another distracting site, end the grace period
+            console.log(`Tab ${tabId} was in a grace period but navigated to another distracting site. Ending grace period.`);
+            stopTimer(tabId); // Stop the grace period timer
+            // Immediately start the distraction-limiting timer with penalties
+            const timeInterval = await getRandomTimeInterval(tabId);
+            startTimer(tabId, timeInterval);
+            increaseCloseProbability(); // Apply penalties
+        } else {
+            // Handle tab update normally if not in a grace period
+            processTabUpdate(tabId, changeInfo.url);
+        }
         delete updateTimeouts[tabId];
     }, 100); // Adjust debounce time as needed
 }
@@ -134,18 +146,26 @@ async function processTabUpdate(tabId, url) {
     if (isDistractingWebsite(url)) {
         console.log(`Tab ${tabId} is distracting.`);
 
-        // Check if the tab came from an allowed context and doesn't already have a timer
-        let previousUrl = tabNavigationHistory[tabId] && tabNavigationHistory[tabId].length > 1 ? tabNavigationHistory[tabId][tabNavigationHistory[tabId].length - 2] : null;
-        if (!tabTimers[tabId] && previousUrl && isAllowedContext(previousUrl)) {
-            console.log(`Tab ${tabId} navigated from an allowed context. Starting grace period.`);
-            startGracePeriodTimer(tabId, 90); // 1.5 minutes grace period
-        } else if (!tabTimers[tabId]) {
-            // Start the distraction-limiting timer immediately if not navigated from an allowed context
-            const timeInterval = await getRandomTimeInterval(tabId);
-            console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
-            startTimer(tabId, timeInterval);
-            increaseCloseProbability(); // Debounced increase of close probability
+        // Debounce the grace period evaluation
+        if (gracePeriodDebounceTimeouts[tabId]) {
+            clearTimeout(gracePeriodDebounceTimeouts[tabId]);
+            console.log(`Debouncing grace period evaluation for Tab ${tabId}`);
         }
+
+        gracePeriodDebounceTimeouts[tabId] = setTimeout(async () => {
+            let previousUrl = tabNavigationHistory[tabId] && tabNavigationHistory[tabId].length > 1 ? tabNavigationHistory[tabId][tabNavigationHistory[tabId].length - 2] : null;
+            if (!tabTimers[tabId] && previousUrl && isAllowedContext(previousUrl) && url.length > 30) {
+                console.log(`Tab ${tabId} navigated from an allowed context and the URL is longer than 30 characters. Starting grace period.`);
+                startGracePeriodTimer(tabId, 90); // 1.5 minutes grace period
+            } else if (!tabTimers[tabId]) {
+                // Start the distraction-limiting timer immediately if not navigated from an allowed context or if the URL is shorter than or equal to 30 characters
+                const timeInterval = await getRandomTimeInterval(tabId);
+                console.log(`Starting timer for Tab ${tabId}, Interval: ${timeInterval} seconds`);
+                startTimer(tabId, timeInterval);
+                increaseCloseProbability(); // Debounced increase of close probability
+            }
+            delete gracePeriodDebounceTimeouts[tabId];
+        }, 2000); // 500 ms debounce time
     } else if (tabTimers[tabId]) {
         console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
         deductTime(tabId);
@@ -156,6 +176,7 @@ async function processTabUpdate(tabId, url) {
         console.log(`Tab ${tabId} is non-distracting and has no active timer.`);
     }
 }
+
 
 function startGracePeriodTimer(tabId, gracePeriod) {
     stopTimer(tabId); // Ensure no existing timer is running
