@@ -379,7 +379,8 @@ function deductTime(tabId) {
 async function getRandomTimeInterval(tabId) {
     const reductionFactor = await calculateReductionFactor();
     const remainingTime = Math.max(0, maxTimeAllowed); // Ensure it doesn't go below 0
-    const interval = Math.floor(Math.max(Math.random(), 0.1) * remainingTime * reductionFactor) + 1;
+    // const interval = Math.floor(Math.max(Math.random(), 0.1) * remainingTime * reductionFactor) + 1;
+    const interval = Math.floor(remainingTime * reductionFactor) + 1;
     console.log(`Calculated random time interval for Tab ${tabId}: ${interval} seconds, within remaining maxTimeAllowed: ${remainingTime} seconds.`);
     return interval;
 }
