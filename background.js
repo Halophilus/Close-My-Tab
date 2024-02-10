@@ -284,7 +284,8 @@ function startTimer(tabId, timeInterval) {
         // Deduct one second from maxTimeAllowed every tick
         maxTimeAllowed = Math.max(0, maxTimeAllowed - 1);
         console.log(`Deducted 1 second from maxTimeAllowed. New maxTimeAllowed: ${maxTimeAllowed} seconds.`);
-
+        browser.storage.local.set({ maxTimeAllowed });
+        
         // Send a message to the content script in the tab to update the displayed timer
         browser.tabs.sendMessage(tabId, { action: 'updateTimer', timeLeft: maxTimeAllowed });
 
