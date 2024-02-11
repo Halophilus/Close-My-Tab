@@ -157,7 +157,7 @@ async function processTabUpdate(tabId, url) {
                 let previousUrl = tabNavigationHistory[tabId] && tabNavigationHistory[tabId].length > 1 ? tabNavigationHistory[tabId][tabNavigationHistory[tabId].length - 2] : null;
                 if (previousUrl && isAllowedContext(previousUrl) && url.length > 50) {
                     console.log(`Tab ${tabId} navigated from an allowed context with URL length > 50. Starting grace period.`);
-                    startGracePeriodTimer(tabId, 90); // Adjust grace period as needed
+                    startGracePeriodTimer(tabId, 600); // Adjust grace period as needed
                 } else {
                     console.log(`Starting active timer for Tab ${tabId}.`);
                     const timeInterval = await getRandomTimeInterval(tabId);
