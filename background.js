@@ -140,6 +140,7 @@ async function processTabUpdate(tabId, url) {
             console.log(`Tab ${tabId} was in a grace period but navigated to another distracting site. Ending grace period and starting timer.`);
             clearTimeout(tabTimers[tabId].timerId); // Clear the grace period timer
             delete tabTimers[tabId].isGracePeriod; // Remove the grace period flag
+            // onDistractingTabClosed(tabId); // Call onDistractingTabClosed as the grace period is ending due to navigation to another distracting site
             const timeInterval = await getRandomTimeInterval(tabId);
             startTimer(tabId, timeInterval); // Start the timer immediately
             return; // Prevent further execution to avoid re-evaluation of grace period
@@ -155,7 +156,7 @@ async function processTabUpdate(tabId, url) {
             gracePeriodDebounceTimeouts[tabId] = setTimeout(async () => {
                 let previousUrl = tabNavigationHistory[tabId] && tabNavigationHistory[tabId].length > 1 ? tabNavigationHistory[tabId][tabNavigationHistory[tabId].length - 2] : null;
                 if (previousUrl && isAllowedContext(previousUrl) && url.length > 50) {
-                    console.log(`Tab ${tabId} navigated from an allowed context with URL length > 30. Starting grace period.`);
+                    console.log(`Tab ${tabId} navigated from an allowed context with URL length > 50. Starting grace period.`);
                     startGracePeriodTimer(tabId, 90); // Adjust grace period as needed
                 } else {
                     console.log(`Starting active timer for Tab ${tabId}.`);
@@ -168,8 +169,9 @@ async function processTabUpdate(tabId, url) {
         }
     } else if (tabTimers[tabId]) {
         console.log(`Tab ${tabId} navigated from distracting to non-distracting site. Stopping timer.`);
-        // deductTime(tabId);
-        onDistractingTabClosed(tabId);
+        if (!tabTimers[tabId].isGracePeriod) {
+            onDistractingTabClosed(tabId); // This remains for cases where the tab transitions from distracting to non-distracting outside of a grace period
+        }
         stopTimer(tabId);
         delete tabCloseReasons[tabId];
     } else {
@@ -177,31 +179,31 @@ async function processTabUpdate(tabId, url) {
     }
 }
 
-
 function startGracePeriodTimer(tabId, gracePeriod) {
     stopTimer(tabId); // Ensure no existing timer is running
 
-    let gracePeriodId = setInterval(() => {
-        if (!tabTimers[tabId] || tabTimers[tabId].stopped) {
-            console.log(`Grace period for Tab ${tabId} ended.`);
-            clearInterval(gracePeriodId);
-            delete tabTimers[tabId];
-            return;
-        }
-
-        browser.tabs.get(tabId).then(tab => {
-            if (!(tab && isDistractingWebsite(tab.url))) {
-                console.log(`Tab ${tabId} no longer on a distracting site. Stopping grace period.`);
-                clearInterval(gracePeriodId);
+    let gracePeriodId = setTimeout(() => {
+        // Grace period ended, check if still on a distracting site
+        (async () => { // Immediately-invoked async function
+            try {
+                const tab = await browser.tabs.get(tabId);
+                if (tab && isDistractingWebsite(tab.url)) {
+                    console.log(`Grace period ended for Tab ${tabId}, still on a distracting site. Starting active timer.`);
+                    const timeInterval = await getRandomTimeInterval(tabId);
+                    startTimer(tabId, timeInterval);
+                } else {
+                    console.log(`Grace period ended for Tab ${tabId}, no longer on a distracting site. No timer started.`);
+                }
+            } catch (error) {
+                console.error(`Error getting tab info for Tab ${tabId} during grace period:`, error);
+            } finally {
+                // Clean up after grace period ends or in case of an error
                 delete tabTimers[tabId];
             }
-        }).catch(error => {
-            console.error(`Error checking Tab ${tabId} during grace period:`, error);
-            clearInterval(gracePeriodId);
-            delete tabTimers[tabId];
-        });
-    }, 1000); // Check every second
+        })();
+    }, gracePeriod * 1000); // Convert gracePeriod from seconds to milliseconds
 
+    // Store the grace period timer details
     tabTimers[tabId] = {
         startTime: Date.now(),
         timerId: gracePeriodId,
@@ -209,6 +211,7 @@ function startGracePeriodTimer(tabId, gracePeriod) {
         isGracePeriod: true
     };
 }
+
 
 
 async function fetchAndStartTimer(tabId) {
@@ -355,7 +358,7 @@ browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
     } else if (tabTimers[tabId]) {
         console.log(`Distracting Tab ${tabId} closed after grace period.`);
         // deductTime(tabId);  // Deduct time from maxTimeAllowed
-        onDistractingTabClosed(tabId);  // Update the last closure time, affecting reduction factor
+        onDistractingTabClosed(tabId); // Call onDistractingTabClosed if the tab is closed in a distracting context
         stopTimer(tabId);  // Stop the timer
         delete tabTimers[tabId];  // Remove the timer entry for this tab
     }
