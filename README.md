@@ -4,7 +4,7 @@
 
 This Firefox extension is designed to help users manage their time on distracting websites more effectively. By setting time limits and enforcing cooldown periods, it encourages more disciplined browsing habits.
 
-It encourages producitve browsing habits by assigning time limits to tabs containing distracting content. Every second spent on a distracting website decrements from a time allotment. Every time a distracting tab is closed, there is a period where the time limits are multiplied by a reducing factor that approaches 1 after a 90 minute cooldown. Every time a distracting tab is opened, the likelihood of a browser closing event at the end of the timer increases by 5%. This probability decrements by 2.5% every hour. At midnight, time allotment resets, but any remaining cooldown depends on user behavior. This was designed as a means of discouraging compulsive browsing behaviors that impede the productive use of the internet.
+It encourages productive browsing habits by assigning random time limits to tabs containing distracting content ranging from the total time allotment to 10% of that value multiplied by the reduction factor. Every second spent on a distracting website decrements from a time allotment. Every time a distracting tab is closed, there is a period where the time limits are multiplied by a reduction factor that approaches 1 after a 90 minute cooldown. Every time a distracting tab is opened, the likelihood of a browser closing event at the end of the timer increases by 5%. This probability decrements by 2.5% every hour. At midnight, time allotment resets, but any remaining cooldown depends on user behavior. This was designed as a means of discouraging compulsive browsing behaviors that impede the productive use of the internet.
 
 The goal of productivity apps shouldn't be to shame and infantalize users into adopting behaviors that don't come to them organically, it should be to create boundaries that arne't overly-restrictive that force the user to think about short and long-term consequences of absent-mindedly sleepwalking through the internet and remind them of the value of their free time.
 
@@ -13,10 +13,12 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 ### Distracting Websites List
 - The list of distracting websites is partially pre-determined by `background.js`, but it can be dynamically expanded through the popup menu.
 - The extension monitors browsing activity and identifies when a user navigates to these sites in new and existing tabs.
-- This extension essentially forces the user to gamble with the amount of time they spend on distracting websites, increasing the likelihood of the browser closing altogether and decreasing the amount of time that can be dedicated to a distraction session over 24 hours and over various cooldown periods. 
+- This extension essentially forces the user to gamble with the amount of time they spend on distracting websites, increasing the likelihood of the browser closing altogether and decreasing the amount of time that can be dedicated to a distraction session over 24 hours and over various cooldown periods.
+- Websites can be added through the popup menu, but removing them requires deeper, inconvenient configuration of the app.
 
 ### Time Limits
 - A daily time allowance (`maxTimeAllowed`) is set for browsing distracting websites.
+- Every time a distracting tab is opened, a timer is assigned based on the reduction factor and a random time limit between 10% and 100% of `maxTimeAllowed`
 - While this timer is running, time is actively being deducted from the daily time allowance.
 - When vistiting a distracting web page, this value is shown at the top of the page, forcing the user to scroll all the way up to check it.
     - This timer dynamically reflects the time remaining in the allowance, reflecting multiple concurrent timers from multiple tabs.
@@ -30,6 +32,13 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 - Once the timer ends, the tab is automatically closed.
 - This time interval is not revealed to the user.
 - This timer ends at the end of its random interval, if the tab is closed, or if the user navigates to a non-distracting site within the tab.
+
+## Visible timer
+- A visible timer is injected into distracting webpages using `content-script.js`
+- This shows the current `maxTimeAllowed`, or the remaining time available for the day.
+- This does NOT reflect the current timer for the tab.
+- This allows the user to monitor live time remaining, including deductions from concurrent distracting tabs.
+- The timer has a fixed position at the very top of the page, forcing users to scroll to the top of the page to check time remaining.
 
 ### Reduction Factor
 - The time allowance for new sessions on distracting websites is reduced based on the elapsed time since the last session ended.
@@ -46,6 +55,7 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 - Some distracting websites are valuable research resources beyond their potential for distraction.
 - This extension provides grace periods for distracting websites accessed through search engines.
 - Homepage URLs / low char URLs belonging to distracting sites do not warrant this grace period, and are appropriately blocked.
+- There are currently bugs due to the redirect behavior of Google and Bing. The only search engine this feature consistently works for is DuckDuckGo.
 
 ### Persistence and Reset
 - All relevant values are stored within extension storage, allowing for consistent behavior between browser/OS resets.
@@ -67,6 +77,10 @@ In order to make altering the configuration of this plugin less accessible, in o
 The popup displays the allotment remaining, the reduction factor, and the browser close probability as progress bars to allow the user to visually assess whether or not they're willing to gamble on a distracting tab. The popup display also provides the live time elapsed since the last distracting tab was closed as a sort of 'score' that the user might identify with and not want to interrupt.
 
 The time allotment remaining is also visualized on the icon itself. A fraction of the icon that represents the amount of time consumed from the daily allotment is darkened so that the user can keep track of their allotment without having to engage with the popup menu and risk catastrophic task-switching.
+
+## Future Direction
+
+Currently, the structure of this extension relies on on-the-fly evaluations of browsing behavior based on tab ID. This is not a very efficient/consistent way to design this app, as edge cases including rapid browsing/redirects often disrupt desired behavior (e.g., grace periods for research-based browsing). If I were to refactor this app, I would store all browsing history on a tab-by-tab basis and use that data to make decisions about how the extension should proceed. Currently, for the sake of my current application, this version works well enough to justify not modifying it further. However, for the sake of similar extension development, I may at some point make an engine to characterize browsing behavior to simplify future implementations of similar extensions.
 
 ## Installation
 
