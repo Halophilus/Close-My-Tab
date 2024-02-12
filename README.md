@@ -20,9 +20,11 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 - A daily time allowance (`maxTimeAllowed`) is set for browsing distracting websites.
 - Every time a distracting tab is opened, a timer is assigned based on the reduction factor and a random time limit between 10% and 100% of `maxTimeAllowed`
 - While this timer is running, time is actively being deducted from the daily time allowance.
-- When vistiting a distracting web page, this value is shown at the top of the page, forcing the user to scroll all the way up to check it.
+- When vistiting a distracting web page, a visible timer is injected using `content-script.js` shown at the top of the page, forcing the user to scroll all the way up to check it.
     - This timer dynamically reflects the time remaining in the allowance, reflecting multiple concurrent timers from multiple tabs.
     !['Countdown timer'](/icons/timer.png)
+    - This shows the current `maxTimeAllowed`, or the remaining time available for the day.
+    - This does NOT reflect the current timer for the tab. 
 - Each session on a distracting website is timed, and the duration is deducted from the daily allowance.
 - Multiple distracting tabs can be opened concurrently, but concurrent timers compound the time deducted from a daily allotment. 
 - If the user navigates from a distracting site to a second distracting site within the same tab, the timer persists with the original allowance.
@@ -32,13 +34,6 @@ The goal of productivity apps shouldn't be to shame and infantalize users into a
 - Once the timer ends, the tab is automatically closed.
 - This time interval is not revealed to the user.
 - This timer ends at the end of its random interval, if the tab is closed, or if the user navigates to a non-distracting site within the tab.
-
-## Visible timer
-- A visible timer is injected into distracting webpages using `content-script.js`
-- This shows the current `maxTimeAllowed`, or the remaining time available for the day.
-- This does NOT reflect the current timer for the tab.
-- This allows the user to monitor live time remaining, including deductions from concurrent distracting tabs.
-- The timer has a fixed position at the very top of the page, forcing users to scroll to the top of the page to check time remaining.
 
 ### Reduction Factor
 - The time allowance for new sessions on distracting websites is reduced based on the elapsed time since the last session ended.
