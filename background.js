@@ -111,10 +111,20 @@ function updateIcon() {
 
 
 function isDistractingWebsite(url) {
-    const isDistracting = distractingWebsites.some(site => url.includes(site));
-    console.log(`URL "${url}" is distracting:`, isDistracting);
-    return isDistracting;
+    try {
+        const parsedUrl = new URL(url);
+        const hostname = parsedUrl.hostname.replace('www.', ''); // Remove 'www.' to match against the list
+
+        // Check if the hostname matches any entry in the distractingWebsites list
+        const isDistracting = distractingWebsites.some(site => hostname.endsWith(site));
+        console.log(`URL "${url}" is distracting:`, isDistracting);
+        return isDistracting;
+    } catch (error) {
+        console.error(`Error parsing URL "${url}":`, error);
+        return false; // Consider URL as non-distracting if there's an error parsing it
+    }
 }
+
 
 function handleTabUpdate(tabId, changeInfo) {
     console.log(`Tab ${tabId} update detected, URL change:`, changeInfo.url);
@@ -442,7 +452,7 @@ browser.webNavigation.onCommitted.addListener(details => {
         tabNavigationHistory[tabId].push(url);
 
         // Keep history manageable, consider only the last 2 entries
-        if (tabNavigationHistory[tabId].length > 2) {
+        if (tabNavigationHistory[tabId].length > 5) {
             tabNavigationHistory[tabId].shift(); // Remove the oldest entry
         }
     }
