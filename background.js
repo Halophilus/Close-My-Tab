@@ -299,9 +299,13 @@ function startTimer(tabId, timeInterval) {
         console.log(`Deducted 1 second from maxTimeAllowed. New maxTimeAllowed: ${maxTimeAllowed} seconds.`);
         browser.storage.local.set({ maxTimeAllowed });
         
-        // Send a message to the content script in the tab to update the displayed timer
-        browser.tabs.sendMessage(tabId, { action: 'updateTimer', timeLeft: maxTimeAllowed });
-
+        // Attempt to send the updateTimer message to the content script
+        browser.tabs.sendMessage(tabId, { action: 'updateTimer', timeLeft: maxTimeAllowed }).catch((error) => {
+            console.error(`Error sending updateTimer message to Tab ${tabId}:`, error);
+            // Re-inject the content script and resend the updateTimer message
+            injectContentScriptAndResendMessage(tabId, { action: 'updateTimer', timeLeft: maxTimeAllowed });
+        });
+        
         let elapsed = (Date.now() - tabTimers[tabId].startTime) / 1000;
         console.log(`Timer Check for Tab ${tabId}, Elapsed: ${elapsed} seconds`);
 
@@ -319,6 +323,21 @@ function startTimer(tabId, timeInterval) {
     };
 }
 
+// Function to inject the content script and resend the message
+function injectContentScriptAndResendMessage(tabId, message) {
+    browser.tabs.executeScript(tabId, {
+        file: "/content-script.js", // Specify the path to your content script
+        runAt: 'document_idle' // Changed to 'document_idle' to ensure the page is loaded
+    }).then(() => {
+        console.log(`Content script re-injected into Tab ${tabId}. Resending message.`);
+        // Resend the message after successful injection
+        browser.tabs.sendMessage(tabId, message).catch(error => {
+            console.error(`Error resending message to Tab ${tabId} after re-injection:`, error);
+        });
+    }).catch(error => {
+        console.error(`Error re-injecting content script into Tab ${tabId}:`, error);
+    });
+}
 
 function checkAndHandleAllotmentExpiry() {
     if (maxTimeAllowed <= 0) {
